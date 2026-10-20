@@ -1,1 +1,53 @@
-# multicrack
+# MultiCrack
+
+Chop stems and multitracks into clean, labeled samples for remixing.
+
+## Get the app
+
+Go to **Releases** (right side of this page), download **MultiCrack.exe**, and double-click it.
+No install needed. The first time, Windows may show "Windows protected your PC": click
+**More info → Run anyway**.
+
+## How it works
+
+1. **Load:** type the artist and song, then drop in stems or a whole stem folder.
+   MultiCrack works out what each file is (kick, hats, drum loops, FX, vocals, guitar...).
+   Change any type, or switch a file to Manual, before processing.
+2. **Review:** every chop shows up with its waveform. Press play, drag the blue handles to trim,
+   change the type from the dropdown, and give it a thumbs up. When everything is green, export.
+3. **Export:** all files land in one folder on your Desktop, for example
+   `Taylor Swift - Style (Chopped)`, named like `TS_Style_Kick_01.wav`.
+
+### What it does with each kind of stem
+
+| Stem | What you get |
+|---|---|
+| Kick, snare, clap, hats, cymbals, toms | Up to 3 distinct hits per sound, tight start, full tail |
+| Unlabeled stem with mixed hits | Each hit is sorted by type, up to 3 of each |
+| Full drums, drum / perc loops, fills | One loop per distinct groove (2, 4, 8 or 16 bars), every hit chopped out of that loop, rolls kept whole, plus single hits |
+| FX | Whooshes, risers, impacts, lasers... each event with its full decay |
+| Vocals | Shouts, adlibs and phrases; repeats only kept when they sound different |
+| Guitar, synth, bass, keys | AI-suggested stabs, chords and 2-bar phrases to approve or fix |
+
+Any file can be opened in **Edit regions** to mark parts by hand.
+
+### Output
+
+- 24-bit WAV at the original sample rate
+- Each sample normalized to −0.1 dB
+- Very light fade at the edges to remove clicks
+- No tempo, key or other tags embedded
+- Re-running a song adds to the folder and keeps counting; nothing is overwritten
+- The whole song shares one tempo, found from the clearest drum stem
+- Split mono files ending in `_L` / `_R` are joined back into stereo when both halves are present
+
+## For developers
+
+```
+pip install -r requirements.txt
+python -m multicrack              # run the app
+python -m multicrack --selftest   # quick check of the engine and window
+python tools/run_stems.py <folder> [--export OUTDIR]   # print what the engine finds
+```
+
+Every push to `main` builds `MultiCrack.exe` on Windows, self-tests it, and publishes it as a release.

@@ -1,0 +1,66 @@
+name: Build MultiCrack
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt "pyinstaller>=6.6,<7"
+
+      - name: Self-test (source)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m multicrack --selftest
+
+      - name: Build MultiCrack.exe
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed
+          --name MultiCrack --icon assets/MultiCrack.ico
+          --exclude-module tkinter --exclude-module matplotlib
+          MultiCrack.py
+
+      - name: Self-test (exe)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\MultiCrack.exe" -ArgumentList "--selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) {
+            Get-Content "$env:TEMP\multicrack_selftest.log" -ErrorAction SilentlyContinue
+            exit 1
+          }
+          "exe self-test passed"
+          (Get-Item "dist\MultiCrack.exe").Length / 1MB
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MultiCrack
+          path: dist/MultiCrack.exe
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: MultiCrack 1.0.${{ github.run_number }}
+          make_latest: true
+          files: dist/MultiCrack.exe
+          body: |
+            Download **MultiCrack.exe** below and double-click it. No install needed.
+
+            First launch: Windows may say "Windows protected your PC". Click **More info → Run anyway**
+            (the app isn't signed with a paid certificate).
