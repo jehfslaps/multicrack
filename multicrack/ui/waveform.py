@@ -116,12 +116,16 @@ class MiniWave(QWidget):
 
 
 class TrimEditor(QWidget):
-    """Large waveform of one chop with draggable start / end handles."""
+    """Large waveform of one chop with draggable start / end handles.
+
+    Zoom with the wheel (or the page's buttons) all the way out to the whole stem.
+    Drag a handle to trim, or drag across empty waveform to select a new section."""
     changed = Signal(int, int)
+    viewChanged = Signal(int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(150)
+        self.setMinimumHeight(170)
         self.setMouseTracking(True)
         self.cache = None
         self.n = 0
@@ -131,15 +135,45 @@ class TrimEditor(QWidget):
         self.sr = 44100
         self.snap = None   # callable(sample) -> sample
 
-    def set_chop(self, cache: PeakCache, n: int, sr: int, start: int, end: int, snap=None):
+    # ------------------------------------------------------------ view
+    def set_chop(self, cache: PeakCache, n: int, sr: int, start: int, end: int, snap=None,
+                 keep_view=False):
+        same_stem = cache is self.cache and n == self.n
         self.cache, self.n, self.sr = cache, n, sr
         self.start, self.end = int(start), int(end)
         self.snap = snap
-        length = max(1, end - start)
-        pad = max(int(0.25 * length), int(0.12 * sr))
-        self.view_a = max(0, start - pad)
-        self.view_b = min(n, end + pad)
+        if keep_view and same_stem and self.view_b > self.view_a:
+            self.update()
+            return
+        self.show_chop()
+
+    def show_chop(self):
+        length = max(1, self.end - self.start)
+        pad = max(int(0.25 * length), int(0.12 * self.sr))
+        self.set_view(self.start - pad, self.end + pad)
+
+    def show_all(self):
+        self.set_view(0, self.n)
+
+    def set_view(self, a, b):
+        span = int(min(self.n, max(int(0.01 * self.sr), b - a)))
+        a = int(max(0, min(self.n - span, a)))
+        self.view_a, self.view_b = a, a + span
         self.update()
+        self.viewChanged.emit(self.view_a, self.view_b)
+
+    def zoom(self, factor, center=None):
+        if self.cache is None:
+            return
+        span = self.view_b - self.view_a
+        if center is None:
+            center = self.view_a + span // 2
+        new = span * factor
+        a = center - (center - self.view_a) * new / max(1, span)
+        self.set_view(int(a), int(a + new))
+
+    def is_whole(self):
+        return self.view_a <= 0 and self.view_b >= self.n
 
     def clear(self):
         self.cache = None
@@ -152,6 +186,7 @@ class TrimEditor(QWidget):
     def _s(self, x):
         return int(self.view_a + x / max(1, self.width()) * (self.view_b - self.view_a))
 
+    # ----------------------------------------------------------- paint
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -162,14 +197,26 @@ class TrimEditor(QWidget):
             p.drawText(r, Qt.AlignCenter, "Press play on a chop to load it here")
             return
         mins, maxs = self.cache.columns(self.view_a, self.view_b, max(8, int(r.width() / 1.5)))
-        cm, cx = self.cache.columns(self.start, self.end, 64)
-        paint_wave(p, r, mins, maxs, _gain(cm, cx))
+        span = self.view_b - self.view_a
+        if span > 4 * max(1, self.end - self.start):
+            gain = min(_gain(mins, maxs), 8.0)        # zoomed out: scale to what's on screen
+        else:
+            cm, cx = self.cache.columns(self.start, self.end, 64)
+            gain = _gain(cm, cx)
+        paint_wave(p, r, mins, maxs, gain)
+        f = QFont(self.font())
+        f.setPointSizeF(8.5)
+        p.setFont(f)
+        self._ruler(p, r)
         xs, xe = self._x(self.start), self._x(self.end)
         shade = QColor(WAVE["shade"])
         shade.setAlpha(165)
-        p.fillRect(QRectF(0, 0, max(0, xs), r.height()), shade)
-        p.fillRect(QRectF(xe, 0, max(0, r.width() - xe), r.height()), shade)
+        p.fillRect(QRectF(0, 0, max(0, min(xs, r.width())), r.height()), shade)
+        if xe < r.width():
+            p.fillRect(QRectF(max(0, xe), 0, r.width() - max(0, xe), r.height()), shade)
         hc = QColor(WAVE["handle"])
+        if xe - xs < 3:     # tiny at this zoom: draw a visible marker
+            p.fillRect(QRectF(xs - 1, 0, 3, r.height()), hc)
         p.setPen(QPen(hc, 2))
         p.drawLine(QPointF(xs, 0), QPointF(xs, r.height()))
         p.drawLine(QPointF(xe, 0), QPointF(xe, r.height()))
@@ -178,55 +225,85 @@ class TrimEditor(QWidget):
         p.drawRoundedRect(QRectF(xs, 0, 12, 16), 2, 2)
         p.drawRoundedRect(QRectF(xe - 12, r.height() - 16, 12, 16), 2, 2)
         p.setPen(QColor("#DDE3E8"))
-        f = QFont(self.font())
-        f.setPointSizeF(8.5)
-        p.setFont(f)
         dur = (self.end - self.start) / self.sr
-        p.drawText(QRectF(8, r.height() - 20, 200, 18), Qt.AlignLeft | Qt.AlignVCenter,
-                   f"{dur:.3f} s")
+        p.drawText(QRectF(8, r.height() - 20, 300, 18), Qt.AlignLeft | Qt.AlignVCenter,
+                   f"{dur:.3f} s selected")
 
+    def _ruler(self, p, r):
+        span_s = (self.view_b - self.view_a) / self.sr
+        steps = [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60]
+        step = next((s for s in steps if span_s / s <= 10), 60)
+        t0 = (int(self.view_a / self.sr / step) + 1) * step
+        p.setPen(QColor("#8A949C"))
+        t = t0
+        while t * self.sr < self.view_b:
+            x = self._x(t * self.sr)
+            p.drawLine(QPointF(x, 0), QPointF(x, 5))
+            m = int(t // 60)
+            sec = t - 60 * m
+            txt = f"{m}:{sec:05.2f}" if step < 1 else f"{m}:{int(round(sec)):02d}"
+            p.drawText(QRectF(x + 3, 2, 70, 14), Qt.AlignLeft | Qt.AlignVCenter, txt)
+            t += step
+
+    # ---------------------------------------------------------- input
     def wheelEvent(self, e):
-        """Zoom around the mouse so trims can be made precisely."""
         if self.cache is None:
             return
-        span = self.view_b - self.view_a
-        center = self._s(e.position().x())
-        factor = 0.8 if e.angleDelta().y() > 0 else 1.25
-        new = int(min(self.n, max(int(0.01 * self.sr), span * factor)))
-        a = int(center - (center - self.view_a) * new / max(1, span))
-        a = max(0, min(self.n - new, a))
-        self.view_a, self.view_b = a, a + new
-        self.update()
+        dy, dx = e.angleDelta().y(), e.angleDelta().x()
+        if e.modifiers() & Qt.ShiftModifier or abs(dx) > abs(dy):
+            d = dx or dy
+            span = self.view_b - self.view_a
+            shift = int(-d / 120 * span * 0.15)
+            self.set_view(self.view_a + shift, self.view_b + shift)
+        else:
+            self.zoom(0.8 if dy > 0 else 1.25, self._s(e.position().x()))
+
+    def _near(self, x):
+        ds, de = abs(x - self._x(self.start)), abs(x - self._x(self.end))
+        if min(ds, de) < 10:
+            return "start" if ds <= de else "end"
+        return None
 
     def mousePressEvent(self, e):
         if self.cache is None:
             return
         x = e.position().x()
-        ds, de = abs(x - self._x(self.start)), abs(x - self._x(self.end))
-        if min(ds, de) < 14:
-            self.drag = "start" if ds <= de else "end"
+        part = self._near(x)
+        if part:
+            self.drag = part
+        else:
+            s = max(0, min(self.n, self._s(x)))
+            self.drag = ("new", s)
 
     def mouseMoveEvent(self, e):
         x = e.position().x()
         if self.drag:
             s = max(0, min(self.n, self._s(x)))
-            if self.drag == "start":
+            if isinstance(self.drag, tuple):
+                anchor = self.drag[1]
+                if abs(s - anchor) > int(0.005 * self.sr):
+                    self.start, self.end = min(anchor, s), max(anchor, s)
+                    self.drag = ("new", anchor, True)
+            elif self.drag == "start":
                 self.start = min(s, self.end - int(0.005 * self.sr))
             else:
                 self.end = max(s, self.start + int(0.005 * self.sr))
             self.update()
         elif self.cache is not None:
-            near = min(abs(x - self._x(self.start)), abs(x - self._x(self.end))) < 14
-            self.setCursor(Qt.SizeHorCursor if near else Qt.ArrowCursor)
+            self.setCursor(Qt.SizeHorCursor if self._near(x) else Qt.IBeamCursor)
 
     def mouseReleaseEvent(self, _e):
-        if self.drag:
-            if self.drag == "start" and self.snap:
-                self.start = int(self.snap(self.start))
-                self.start = min(self.start, self.end - int(0.005 * self.sr))
-            self.drag = None
-            self.update()
-            self.changed.emit(self.start, self.end)
+        d = self.drag
+        self.drag = None
+        if not d:
+            return
+        if isinstance(d, tuple) and len(d) < 3:
+            return          # a plain click on the waveform: keep the current selection
+        if (d == "start" or isinstance(d, tuple)) and self.snap:
+            self.start = int(self.snap(self.start))
+            self.start = min(self.start, self.end - int(0.005 * self.sr))
+        self.update()
+        self.changed.emit(self.start, self.end)
 
 
 class StemView(QWidget):

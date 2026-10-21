@@ -4,7 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton,
-                               QScrollArea, QToolButton, QVBoxLayout, QWidget)
+                               QScrollArea, QScrollBar, QToolButton, QVBoxLayout, QWidget)
 
 from ..core.audio import render_chop
 from ..core.naming import assign_names
@@ -152,12 +152,16 @@ class ReviewPage(QWidget):
         self.ed_name.setFont(f)
         head.addWidget(self.ed_name)
         head.addStretch(1)
-        head.addWidget(label("Drag the blue handles to trim. Scroll on the waveform to zoom.",
-                             "muted"))
+        head.addWidget(label("Drag the blue handles to trim, or drag across the waveform to pick "
+                             "a new section. Scroll to zoom, Shift+scroll to move.", "muted"))
         el.addLayout(head)
         self.editor = TrimEditor()
         self.editor.changed.connect(self._trimmed)
         el.addWidget(self.editor)
+        self.ed_scroll = QScrollBar(Qt.Horizontal)
+        self.ed_scroll.valueChanged.connect(self._scrolled)
+        self.editor.viewChanged.connect(self._view_changed)
+        el.addWidget(self.ed_scroll)
         er = QHBoxLayout()
         self.ed_play = QPushButton("Play")
         self.ed_play.clicked.connect(lambda: self.play_selected())
@@ -176,6 +180,17 @@ class ReviewPage(QWidget):
             lambda on: self.win.settings.setValue("snap_trim", "true" if on else "false"))
         er.addSpacing(8)
         er.addWidget(self.ed_snap)
+        er.addSpacing(12)
+        for text, tip, fn in (("−", "Zoom out", lambda: self.editor.zoom(1.6)),
+                              ("+", "Zoom in", lambda: self.editor.zoom(0.6)),
+                              ("Zoom to chop", "Frame the selected section", self.editor.show_chop),
+                              ("Whole stem", "Show the entire stem", self.editor.show_all)):
+            b = QPushButton(text)
+            b.setToolTip(tip)
+            if len(text) == 1:
+                b.setFixedWidth(36)
+            b.clicked.connect(fn)
+            er.addWidget(b)
         self.ed_flag = label("", "warn", wrap=True)
         er.addWidget(self.ed_flag, 1)
         el.addLayout(er)
@@ -299,7 +314,23 @@ class ReviewPage(QWidget):
             if not self.ed_snap.isChecked() or chop.kind == "loop":
                 return s           # loops stay where you put them (bar lines are yours to move)
             return magnet_to_hit(st, s)
-        self.editor.set_chop(self.win.peaks(st), st.frames, st.sr, chop.start, chop.end, snap)
+        self.editor.set_chop(self.win.peaks(st), st.frames, st.sr, chop.start, chop.end, snap,
+                             keep_view=self.editor.is_whole())
+        self._view_changed(self.editor.view_a, self.editor.view_b)
+
+    def _view_changed(self, a, b):
+        span = max(1, b - a)
+        self.ed_scroll.blockSignals(True)
+        self.ed_scroll.setRange(0, max(0, self.editor.n - span))
+        self.ed_scroll.setPageStep(span)
+        self.ed_scroll.setSingleStep(max(1, span // 20))
+        self.ed_scroll.setValue(a)
+        self.ed_scroll.setVisible(span < self.editor.n)
+        self.ed_scroll.blockSignals(False)
+
+    def _scrolled(self, v):
+        span = self.editor.view_b - self.editor.view_a
+        self.editor.set_view(v, v + span)
 
     def play_selected(self):
         c = self.selected
@@ -318,9 +349,6 @@ class ReviewPage(QWidget):
         row = self.rows.get(c.id)
         if row:
             row.update_view()
-        st = self.win.stem_by_id(c.stem_id)
-        if s <= self.editor.view_a + int(0.02 * st.sr) or e >= self.editor.view_b - int(0.02 * st.sr):
-            self._load_editor(c, st)   # handle reached the edge: re-frame so you can keep going
         self.play_selected()
 
     def reset_trim(self):
