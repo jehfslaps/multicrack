@@ -1,6 +1,8 @@
 """Manual mode: mark regions by hand (vocals, melodic parts, anything)."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QHBoxLayout, QHeaderView,
                                QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
@@ -28,7 +30,7 @@ class ManualDialog(QDialog):
             if c.stem_id == stem.id:
                 self.regions.append(dict(start=c.start, end=c.end, label=c.label, kind=c.kind,
                                          bars=c.bars, origin=c.origin, flag=c.flag,
-                                         approved=c.approved,
+                                         approved=c.approved, src=c,
                                          style="ai" if c.origin in ("ai", "auto") else "user"))
 
         lay = QVBoxLayout(self)
@@ -208,10 +210,13 @@ class ManualDialog(QDialog):
     def apply(self):
         new = []
         for r in self.regions:
-            new.append(Chop(stem_id=self.stem.id, start=int(r["start"]), end=int(r["end"]),
-                            label=r["label"], kind=r["kind"] if r["kind"] != "region" else "event",
-                            bars=r["bars"], origin=r["origin"],
-                            flag="" if r["style"] == "user" else r["flag"],
-                            approved=r["approved"] and r["style"] != "user"))
+            fields = dict(start=int(r["start"]), end=int(r["end"]), label=r["label"],
+                          kind=r["kind"] if r["kind"] != "region" else "event", bars=r["bars"],
+                          origin=r["origin"], flag="" if r["style"] == "user" else r["flag"],
+                          approved=r["approved"] and r["style"] != "user")
+            src = r.get("src")
+            # keep fades / reverse / gain made on the Review page
+            new.append(replace(src, **fields) if src is not None
+                       else Chop(stem_id=self.stem.id, **fields))
         self.accept()
         self.win.replace_chops(self.stem, new, status=f"{len(new)} chops")

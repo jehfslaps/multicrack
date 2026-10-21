@@ -65,6 +65,25 @@ def run(gui=True) -> int:
             pos += 8 + size + (size & 1)
         assert chunks == [b"fmt ", b"data"], chunks
         _ = write_wav24
+        # per-chop edits: reverse, gain, fades, loop seam
+        from .audio import render_chop
+        loop = next(c for c in chops if c.kind == "loop")
+        st = next(s for s in stems if s.id == loop.stem_id)
+        loop.reverse, loop.gain_db, loop.fade_out_ms = True, -6.0, 20.0
+        y = render_chop(st, loop)
+        assert abs(20 * np.log10(np.abs(y).max()) + 6.1) < 0.05
+        loop.reverse, loop.gain_db, loop.fade_out_ms = False, 0.0, None
+        # sessions round-trip
+        from . import session
+        meta = {"artist": "Self", "song": "Test"}
+        data = session.to_dict(meta, stems, chops)
+        assert len(data["chops"]) == len(chops) and data["stems"][0]["kind"] == "Kick"
+        # sound-recognition model (bundled with the app)
+        from . import ai
+        if ai._model_dir():
+            assert ai.available(), "AI model failed to load"
+            tg = ai.tags(k[: sr], sr)
+            assert tg, "AI model returned nothing"
         if gui:
             os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
             from PySide6.QtWidgets import QApplication
@@ -75,8 +94,20 @@ def run(gui=True) -> int:
             w.chops = chops
             w.load_page.refresh()
             w.review_page.rebuild()
+            n0 = len(w.chops)
+            w.review_page.delete_chop(w.chops[0])
+            assert len(w.chops) == n0 - 1
+            w.undo()
+            assert len(w.chops) == n0
+            w.redo()
+            assert len(w.chops) == n0 - 1
+            w.review_page.clone_chop(w.chops[0])
+            w.review_page.approve_and_next()
             w.toggle_theme()
             w.toggle_theme()
+            w.autosave_path = os.path.join(out, "autosave.multicrack")
+            w.autosave()
+            assert os.path.exists(w.autosave_path)
             w.close()
             _ = app
         print(f"selftest ok: {len(chops)} chops, {len(files)} files")

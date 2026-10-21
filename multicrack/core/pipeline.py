@@ -5,7 +5,7 @@ import os
 
 import numpy as np
 
-from . import classify, engines, tempo
+from . import ai, classify, engines, tempo
 from .audio import render_chop, write_wav24
 from .dsp import pitch_strength
 from .model import STEM_KINDS, Chop, Stem
@@ -20,7 +20,16 @@ def detect_kind(stem: Stem) -> str:
     an = engines.get_analysis(stem)
     centroid = classify.summarize_spectrum(an)
     stem.analysis["centroid"] = centroid
-    hinted = classify.kind_from_name(stem.name)
+    hints = classify.kinds_from_name(stem.name)
+    stem.analysis["ai_used"] = False
+    if len(hints) == 1:
+        hinted = hints[0]
+    else:
+        # no clue in the name, or it points two ways ("Vox_Fx"): let the trained model listen
+        hinted = ai.best_kind(stem, an, hints or None)
+        stem.analysis["ai_used"] = hinted is not None
+        if hinted is None and hints:
+            hinted = hints[0]
     if hinted == "Synth" and centroid and centroid < 300:
         hinted = "Bass"
     if hinted:

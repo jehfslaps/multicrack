@@ -39,18 +39,24 @@ HINTS = [
 ]
 
 
-def kind_from_name(name: str):
+def kinds_from_name(name: str) -> list:
+    """Every stem kind the file name points to, in priority order."""
     toks = [t.lower() for t in split_tokens(name)]
     joined = "".join(toks)
+    out = []
     for kind, words in HINTS:
-        if any(t in words for t in toks):
-            return kind
-    # compound words such as "hihat", "kickdrum", "percloop"
-    for kind, words in HINTS:
-        for w in words:
-            if len(w) >= 4 and w in joined:
-                return kind
-    return None
+        if any(t in words for t in toks) and kind not in out:
+            out.append(kind)
+    if not out:   # compound words such as "hihat", "kickdrum", "percloop"
+        for kind, words in HINTS:
+            if any(len(w) >= 4 and w in joined for w in words) and kind not in out:
+                out.append(kind)
+    return out
+
+
+def kind_from_name(name: str):
+    k = kinds_from_name(name)
+    return k[0] if k else None
 
 
 def kind_from_audio(an, onsets, label_counts: dict, tempo_conf: float, active_frac: float,

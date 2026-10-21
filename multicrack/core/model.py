@@ -12,7 +12,8 @@ import numpy as np
 DRUM_LABELS = ["Kick", "Snare", "Clap", "Rim", "Closed Hat", "Open Hat", "Ride",
                "Crash", "Tom", "Shaker", "Tambourine", "Perc"]
 LOOP_LABELS = ["Drum Loop", "Perc Loop", "Top Loop", "Fill", "Roll"]
-FX_LABELS = ["Whoosh", "Riser", "Downlifter", "Impact", "Laser", "Noise", "FX"]
+FX_LABELS = ["Whoosh", "Riser", "Downlifter", "Impact", "Laser", "Air Horn", "Siren", "Noise",
+             "FX"]
 MELODIC_LABELS = ["Guitar Chord", "Guitar Lead", "Guitar Stab", "Synth Lead", "Synth Stab",
                   "Pad", "Keys", "Bass", "Strings", "Brass"]
 VOCAL_LABELS = ["Vocal Shout", "Vocal Chop", "Vocal FX", "Adlib", "Vocal Phrase"]
@@ -63,6 +64,11 @@ class Chop:
     flag: str = ""              # note shown on the review list
     cut_at_next: bool = False   # the tail was cut where the next sound starts
     approved: bool = False
+    fade_in_ms: Optional[float] = None    # None = automatic de-click
+    fade_out_ms: Optional[float] = None
+    reverse: bool = False
+    gain_db: float = 0.0                  # 0 = full level (normalized); negative turns it down
+    seam: bool = True                     # loops: crossfade the loop point so it repeats cleanly
     id: int = field(default_factory=lambda: next(_ids))
 
     @property

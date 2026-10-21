@@ -60,9 +60,13 @@ class ExportPage(QWidget):
         self.again.clicked.connect(self.win.start_over)
         row.addWidget(self.again)
         self.open = QPushButton("Open folder")
-        self.open.setObjectName("primary")
         self.open.clicked.connect(lambda: self.folder and open_folder(self.folder))
         row.addWidget(self.open)
+        self.next_btn = QPushButton("")
+        self.next_btn.setObjectName("primary")
+        self.next_btn.clicked.connect(lambda: self.win.next_song(0))
+        self.next_btn.hide()
+        row.addWidget(self.next_btn)
         bl.addLayout(row)
         wrap = QVBoxLayout()
         wrap.addWidget(box)
@@ -70,6 +74,15 @@ class ExportPage(QWidget):
         outer.addLayout(wrap)
         outer.addStretch(1)
         self.show_result([], "")
+
+    def set_next(self, name, waiting):
+        if name:
+            self.next_btn.setText(f"Next song: {name}" + (f"  ({waiting} in queue)" if waiting > 1 else ""))
+            self.next_btn.show()
+            self.again.hide()
+        else:
+            self.next_btn.hide()
+            self.again.show()
 
     def show_result(self, files, folder):
         self.folder = folder

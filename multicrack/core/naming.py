@@ -41,8 +41,10 @@ def label_token(label: str) -> str:
     return "".join(w[:1].upper() + w[1:] for w in _clean_words(label)) or "Sample"
 
 
-def chop_key(label: str, bars) -> str:
+def chop_key(label: str, bars, reverse: bool = False) -> str:
     tok = label_token(label)
+    if reverse:
+        tok += "Rev"
     if label in LOOPED_LABELS and bars:
         tok += f"_{int(bars)}bar"
     return tok
@@ -67,7 +69,7 @@ def assign_names(chops, prefix: str, folder: str = "") -> dict:
     counts = existing_counts(folder, prefix)
     names = {}
     for c in chops:
-        k = chop_key(c.label, c.bars)
+        k = chop_key(c.label, c.bars, getattr(c, "reverse", False))
         counts[k] = counts.get(k, 0) + 1
         names[c.id] = f"{prefix}{k}_{counts[k]:02d}.wav"
     return names

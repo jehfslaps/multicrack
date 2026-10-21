@@ -29,10 +29,16 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: python -m multicrack --selftest
 
+      - name: Stamp the version
+        shell: bash
+        run: echo 'BUILD = "1.0.${{ github.run_number }}"' > multicrack/_build.py
+
       - name: Build MultiCrack.exe
         run: >
           pyinstaller --noconfirm --clean --onefile --windowed
           --name MultiCrack --icon assets/MultiCrack.ico
+          --add-data "assets/models;assets/models"
+          --collect-all sherpa_onnx
           --exclude-module tkinter --exclude-module matplotlib
           MultiCrack.py
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from . import classify
+from . import ai, classify
 from .dsp import Analysis, farthest_pick, group_items
 from .model import DRUM_LABELS, Chop, Stem
 from .naming import split_tokens
@@ -97,7 +97,10 @@ def _pick_hits(stem: Stem, hits: list[dict], context: str) -> list[Chop]:
         picked = farthest_pick(vecs, list(range(len(top))), k, MIN_DIFF_HIT)
         for i in sorted(picked, key=lambda i: top[i]["start"]):
             h = top[i]
-            chops.append(Chop(stem_id=stem.id, start=h["start"], end=h["end"], label=label,
+            lab = label
+            if context in ("drums", "perc", "fills", "mixed") and ai.available():
+                lab = ai.hit_label(ai.tags(stem.mono()[h["start"]:h["end"]], stem.sr)) or label
+            chops.append(Chop(stem_id=stem.id, start=h["start"], end=h["end"], label=lab,
                               kind="hit", cut_at_next=h["cut"],
                               flag="Tail cut at the next hit." if h["cut"] else ""))
     return chops
@@ -388,8 +391,11 @@ def events_engine(stem: Stem, bpm=None) -> list[Chop]:
         f = an.event_features(s, e)
         if family == "fx":
             label = classify.fx_label(f)
+            tg = ai.tags(an.m[s:e], sr)
+            label = ai.fx_label(tg) or label
         elif family == "vocal":
             label = classify.vocal_label(f, fx_hint)
+            label = ai.vocal_label(ai.tags(an.m[s:e], sr), label) if ai.available() else label
         else:
             label = classify.melodic_label(f, ctx)
         items.append(dict(start=s, end=e, f=f, label=label, trimmed=trimmed))

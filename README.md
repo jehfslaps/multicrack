@@ -13,14 +13,37 @@ No install needed. The first time, Windows may show "Windows protected your PC":
 1. **Load:** type the artist and song, then drop in stems or a whole stem folder.
    MultiCrack works out what each file is (kick, hats, drum loops, FX, vocals, guitar...).
    Change any type, or switch a file to Manual, before processing.
+   Drop a folder that holds several song folders (named like `Artist - Song`) to queue them up.
 2. **Review:** every chop shows up with its waveform. Press play, drag the blue handles to trim,
    change the type from the dropdown, and give it a thumbs up. When everything is green, export.
-   Keys on the Review page: **↑ / ↓** move through the chops and play each one, **Space** plays,
-   **Enter** approves, **Delete** removes, **Ctrl+D** clones, **S** turns snapping on or off. In the trim editor, scroll to zoom
-   (all the way out to the whole stem), Shift+scroll to move, and drag across the waveform to
-   pick a new section.
+   - Per chop: fade in / fade out, reverse, gain (turn down from full level), smooth loop seam,
+     clone, delete. Drag any row straight into FL Studio.
+   - Trim editor: scroll to zoom (all the way out to the whole stem), Shift+scroll to move,
+     drag across the waveform to pick a new section. A playhead shows what's playing; loops
+     repeat so you can hear the seam.
+   - Per stem: Approve all / Remove all.
 3. **Export:** all files land in one folder on your Desktop, for example
-   `Taylor Swift - Style (Chopped)`, named like `TS_Style_Kick_01.wav`.
+   `Taylor Swift - Style (Chopped)`, named like `TS_Style_Kick_01.wav`. With a queue, the next
+   song loads with one click.
+
+Your work is saved automatically. If the app closes, it offers to pick up where you left off.
+Menu › Save session as… / Open session… keep a session as a file. MultiCrack checks for new
+versions when it starts and updates itself with one click.
+
+### Keys on the Review page
+
+| Key | Does |
+|---|---|
+| ↑ / ↓ | Move through the chops and play each one |
+| Space | Play / stop |
+| A | Approve and jump to the next chop |
+| Enter | Approve / un-approve |
+| Delete | Delete the chop |
+| Ctrl+D | Clone the chop |
+| Ctrl+Z / Ctrl+Y | Undo / redo |
+| R | Reverse on / off |
+| L | Loop playback on / off |
+| S | Snap on / off |
 
 ### What it does with each kind of stem
 
@@ -29,7 +52,7 @@ No install needed. The first time, Windows may show "Windows protected your PC":
 | Kick, snare, clap, hats, cymbals, toms | Up to 3 distinct hits per sound, tight start, full tail |
 | Unlabeled stem with mixed hits | Each hit is sorted by type, up to 3 of each |
 | Full drums, drum / perc loops, fills | One loop per distinct groove (2, 4, 8 or 16 bars), every hit chopped out of that loop, rolls kept whole, plus single hits |
-| FX | Whooshes, risers, impacts, lasers... each event with its full decay |
+| FX | Whooshes, risers, impacts, lasers, air horns, sirens... each event with its full decay |
 | Vocals | Shouts, adlibs and phrases; repeats only kept when they sound different |
 | Guitar, synth, bass, keys | AI-suggested stabs, chords and 2-bar phrases to approve or fix |
 
@@ -44,6 +67,12 @@ Any file can be opened in **Edit regions** to mark parts by hand.
 - Re-running a song adds to the folder and keeps counting; nothing is overwritten
 - The whole song shares one tempo, found from the clearest drum stem
 - Split mono files ending in `_L` / `_R` are joined back into stereo when both halves are present
+
+## Sound recognition
+
+File names come first. When a name is unclear or points two ways, a bundled trained model
+(CED-mini, AudioSet classes, Apache 2.0, via sherpa-onnx) listens to the stem. The same model labels
+FX and vocal events and confirms claps, tambourines, shakers and rimshots.
 
 ## For developers
 

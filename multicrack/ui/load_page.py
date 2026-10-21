@@ -5,7 +5,7 @@ import os
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFrame, QHBoxLayout,
-                               QHeaderView, QLabel, QLineEdit, QProgressBar, QPushButton,
+                               QHeaderView, QLabel, QLineEdit, QListWidget, QProgressBar, QPushButton,
                                QSizePolicy, QTableWidget, QTableWidgetItem, QToolButton,
                                QVBoxLayout, QWidget)
 
@@ -33,7 +33,8 @@ class DropZone(QFrame):
         col = QVBoxLayout()
         col.setSpacing(2)
         col.addWidget(label("Drop stems or a whole stem folder here", "h2"))
-        col.addWidget(label("WAV, AIFF, FLAC, MP3, OGG and other audio files", "muted"))
+        col.addWidget(label("WAV, AIFF, FLAC, MP3, OGG… Drop a folder of song folders to queue "
+                            "several songs.", "muted"))
         lay.addLayout(col)
         self.browse_files = QPushButton("Browse files…")
         self.browse_folder = QPushButton("Browse folder…")
@@ -109,6 +110,31 @@ class LoadPage(QWidget):
                   "Light de-click on the edges", "Up to 3 variations per sound",
                   "No tempo, key or other tags embedded"):
             sl.addWidget(label(t))
+        # ---- song queue (shown when several songs were dropped at once)
+        self.queue_box = QWidget()
+        ql = QVBoxLayout(self.queue_box)
+        ql.setContentsMargins(0, 6, 0, 0)
+        ql.setSpacing(6)
+        ql.addWidget(hline())
+        self.queue_title = label("Song queue", "h2")
+        ql.addWidget(self.queue_title)
+        self.queue_list = QListWidget()
+        self.queue_list.setMaximumHeight(150)
+        ql.addWidget(self.queue_list)
+        qr = QHBoxLayout()
+        self.queue_start = QPushButton("Start this song")
+        self.queue_start.clicked.connect(
+            lambda: self.queue_list.currentRow() >= 0 and self.win.next_song(self.queue_list.currentRow()))
+        qr.addWidget(self.queue_start)
+        self.queue_remove = QPushButton("Remove")
+        self.queue_remove.clicked.connect(
+            lambda: self.win.remove_from_queue(self.queue_list.currentRow()))
+        qr.addWidget(self.queue_remove)
+        ql.addLayout(qr)
+        ql.addWidget(label("After exporting, the next song loads with one click.", "muted",
+                           wrap=True))
+        sl.addWidget(self.queue_box)
+        self.queue_box.hide()
         sl.addStretch(1)
         outer.addWidget(sp)
 
@@ -188,6 +214,23 @@ class LoadPage(QWidget):
         self.exists_lbl.setText("This folder already exists. New chops are added and the "
                                 "numbering continues." if os.path.isdir(folder) else "")
         self.win.names_changed()
+
+    def set_song(self, artist, song):
+        self.prefix_edited = False
+        self.artist.setText(artist or "")
+        self.song.setText(song or "")
+        self._names_changed()
+
+    def refresh_queue(self):
+        q = self.win.queue
+        self.queue_list.clear()
+        for item in q:
+            name = " - ".join(p for p in (item.get("artist"), item.get("song")) if p) or "Untitled"
+            self.queue_list.addItem(name)
+        if q:
+            self.queue_list.setCurrentRow(0)
+        self.queue_title.setText(f"Song queue ({len(q)} waiting)")
+        self.queue_box.setVisible(bool(q))
 
     def output_folder(self) -> str:
         return os.path.join(self.win.base_dir, folder_name(self.artist.text(), self.song.text()))

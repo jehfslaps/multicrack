@@ -99,10 +99,17 @@ class MiniWave(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.cache = None
         self.a = self.b = 0
+        self.reverse = False
+        self.playhead = None      # 0..1 or None
 
-    def set_chop(self, cache: PeakCache, a: int, b: int):
-        self.cache, self.a, self.b = cache, a, b
+    def set_chop(self, cache: PeakCache, a: int, b: int, reverse=False):
+        self.cache, self.a, self.b, self.reverse = cache, a, b, reverse
         self.update()
+
+    def set_playhead(self, frac):
+        if frac != self.playhead:
+            self.playhead = frac
+            self.update()
 
     def paintEvent(self, _e):
         p = QPainter(self)
@@ -112,7 +119,13 @@ class MiniWave(QWidget):
             p.fillRect(r, QColor(WAVE["bg"]))
             return
         mins, maxs = self.cache.columns(self.a, self.b, max(8, int(r.width() / 2)))
+        if self.reverse:
+            mins, maxs = mins[::-1], maxs[::-1]
         paint_wave(p, r, mins, maxs, _gain(mins, maxs), grid=False)
+        if self.playhead is not None:
+            x = r.width() * self.playhead
+            p.setPen(QPen(QColor("#FFFFFF"), 1.5))
+            p.drawLine(QPointF(x, 0), QPointF(x, r.height()))
 
 
 class TrimEditor(QWidget):
@@ -134,6 +147,19 @@ class TrimEditor(QWidget):
         self.drag = None
         self.sr = 44100
         self.snap = None   # callable(sample) -> sample
+        self.fade_in = 0   # samples (drawn as ramps)
+        self.fade_out = 0
+        self.reverse = False
+        self.playhead = None   # stem sample position or None
+
+    def set_fx(self, fade_in: int, fade_out: int, reverse: bool):
+        self.fade_in, self.fade_out, self.reverse = int(fade_in), int(fade_out), bool(reverse)
+        self.update()
+
+    def set_playhead(self, s):
+        if s != self.playhead:
+            self.playhead = s
+            self.update()
 
     # ------------------------------------------------------------ view
     def set_chop(self, cache: PeakCache, n: int, sr: int, start: int, end: int, snap=None,
@@ -224,10 +250,23 @@ class TrimEditor(QWidget):
         p.setBrush(hc)
         p.drawRoundedRect(QRectF(xs, 0, 12, 16), 2, 2)
         p.drawRoundedRect(QRectF(xe - 12, r.height() - 16, 12, 16), 2, 2)
+        # fades (as heard: a reversed chop fades in from its original end)
+        fi, fo = (self.fade_out, self.fade_in) if self.reverse else (self.fade_in, self.fade_out)
+        ramp = QPen(QColor(255, 255, 255, 170), 1.4)
+        ramp.setStyle(Qt.DashLine)
+        p.setPen(ramp)
+        if fi > 0:
+            p.drawLine(QPointF(xs, r.height() - 2), QPointF(self._x(self.start + fi), 18))
+        if fo > 0:
+            p.drawLine(QPointF(self._x(self.end - fo), 18), QPointF(xe, r.height() - 2))
+        if self.playhead is not None:
+            xp = self._x(self.playhead)
+            p.setPen(QPen(QColor("#FFFFFF"), 1.6))
+            p.drawLine(QPointF(xp, 0), QPointF(xp, r.height()))
         p.setPen(QColor("#DDE3E8"))
         dur = (self.end - self.start) / self.sr
-        p.drawText(QRectF(8, r.height() - 20, 300, 18), Qt.AlignLeft | Qt.AlignVCenter,
-                   f"{dur:.3f} s selected")
+        p.drawText(QRectF(8, r.height() - 20, 400, 18), Qt.AlignLeft | Qt.AlignVCenter,
+                   f"{dur:.3f} s selected" + ("  ·  plays reversed" if self.reverse else ""))
 
     def _ruler(self, p, r):
         span_s = (self.view_b - self.view_a) / self.sr
