@@ -7,7 +7,7 @@ import time
 from dataclasses import replace
 
 from PySide6.QtCore import QPoint, QSettings, QSize, QStandardPaths, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QColor, QDesktopServices, QKeySequence
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFileDialog, QFrame, QHBoxLayout,
                                QLabel, QMainWindow, QMenu, QMessageBox, QPushButton,
@@ -110,8 +110,9 @@ class UpdateCheck(QThread):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, handoff=None):
         super().__init__()
+        self.handoff = None          # filled in when the UI size changes (see app.main)
         self.settings = QSettings(APP_NAME, APP_NAME)
         self._migrate_settings()
         self.theme_name = self.settings.value("theme", "light")
@@ -137,46 +138,45 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{APP_NAME} {updater.current_version()}")
         self.setWindowIcon(logo.app_icon())
-        self.resize(1480, 940)
-        self.setMinimumSize(QSize(1040, 700))
+        self._fit_default_size()
 
         skin.apply(self.theme_name)
         central = W.Chassis()
         v = QVBoxLayout(central)
-        v.setContentsMargins(22, 20, 22, 18)
-        v.setSpacing(14)
+        v.setContentsMargins(20, 18, 20, 16)
+        v.setSpacing(12)
 
         top = QHBoxLayout()
-        top.setSpacing(14)
-        brand = W.Plate(margins=(26, 4, 22, 4))
-        brand.setFixedHeight(70)
-        self.brand_mark = W.LogoMark(46)
+        top.setSpacing(12)
+        brand = W.Plate(margins=(18, 4, 18, 4))
+        brand.setFixedHeight(K.H_TOP)
+        self.brand_mark = W.LogoMark(40)
         brand.lay.addWidget(self.brand_mark)
         brand.lay.addSpacing(12)
-        self.brand_lbl = W.mono("XENAKIS", "plate_text", 31, 700, 5.5)
+        self.brand_lbl = W.mono("XENAKIS", "plate_text", 28, 700, 5.0)
         brand.lay.addWidget(self.brand_lbl)
         brand.lay.addSpacing(6)
         self.version_badge = W.Badge(f"XK-1  [v{updater.current_version()}]")
         brand.lay.addWidget(self.version_badge)
         top.addWidget(brand)
         self.steps_sel = W.StepSelector(["01 LOAD", "02 REVIEW", "03 EXPORT"])
-        self.steps_sel.setFixedHeight(64)
+        self.steps_sel.setFixedHeight(K.H_TOP)
         self.steps_sel.clicked.connect(self.go)
         top.addWidget(self.steps_sel)
         self.lcd = W.Lcd("SONG TEMPO", "— BPM", value_px=21, min_w=230)
-        self.lcd.setFixedHeight(64)
+        self.lcd.setFixedHeight(K.H_TOP)
         top.addWidget(self.lcd, 1)
-        self.update_btn = W.HwButton("Update", "red", icon="export", min_h=50, px=12.5)
+        self.update_btn = W.HwButton("Update", "red", icon="export", min_h=K.H_ROW, px=12.5)
         self.update_btn.hide()
         self.update_btn.clicked.connect(self.install_update)
         top.addWidget(self.update_btn)
         self.theme_btn = W.LeverSwitch("LIGHT", "DARK")
-        self.theme_btn.setFixedSize(140, 64)
+        self.theme_btn.setFixedSize(132, K.H_TOP)
         self.theme_btn.setChecked(self.theme_name == "dark")
         self.theme_btn.setToolTip("Light / dark")
         self.theme_btn.clicked.connect(self.toggle_theme)
         top.addWidget(self.theme_btn)
-        self.menu_btn = W.HwButton("", "icon", icon="menu", min_h=64)
+        self.menu_btn = W.HwButton("", "icon", icon="menu", min_h=K.H_TOP)
         self.menu_btn.setToolTip("Menu")
         self._menu = self._build_menu()
         self.menu_btn.clicked.connect(lambda: self._menu.exec(
@@ -209,8 +209,11 @@ class MainWindow(QMainWindow):
         self.load_page.refresh()
         updater.cleanup_old()
         shutil.rmtree(DRAG_DIR, ignore_errors=True)
-        QTimer.singleShot(400, self._offer_resume)
-        if updater.is_frozen():
+        if handoff:
+            self._adopt(handoff)
+        else:
+            QTimer.singleShot(400, self._offer_resume)
+        if updater.is_frozen() and not handoff:
             QTimer.singleShot(2500, lambda: self.check_updates(quiet=True))
 
     def _build_menu(self):
@@ -220,11 +223,27 @@ class MainWindow(QMainWindow):
                  ("Save session as…", QKeySequence("Ctrl+S"), self.save_session_as), None,
                  ("Undo", QKeySequence.Undo, self.undo),
                  ("Redo", QKeySequence("Ctrl+Y"), self.redo), None,
+                 "ui_size", None,
                  ("Check for updates…", None, lambda: self.check_updates(quiet=False)),
                  (f"About {APP_NAME}", None, self.about)]
         for it in items:
             if it is None:
                 m.addSeparator()
+                continue
+            if it == "ui_size":
+                sm = m.addMenu("UI size")
+                self.ui_size_actions = {}
+                grp = QActionGroup(self)
+                cur = self._ui_size()
+                for key, label in (("small", "Small"), ("medium", "Medium (default)"),
+                                   ("large", "Large")):
+                    a = QAction(label, self)
+                    a.setCheckable(True)
+                    a.setChecked(key == cur)
+                    grp.addAction(a)
+                    a.triggered.connect(lambda _=False, k=key: self.set_ui_size(k))
+                    sm.addAction(a)
+                    self.ui_size_actions[key] = a
                 continue
             text, key, fn = it
             a = QAction(text, self)
@@ -235,6 +254,118 @@ class MainWindow(QMainWindow):
             a.triggered.connect(fn)
             m.addAction(a)
         return m
+
+    # ------------------------------------------------------------ UI size
+    @staticmethod
+    def _ui_size():
+        from ..app import ui_size
+        return ui_size()
+
+    def _scale(self):
+        try:
+            return float(os.environ.get("QT_SCALE_FACTOR", "1") or 1)
+        except ValueError:
+            return 1.0
+
+    def _fit_default_size(self):
+        """1480 x 940 (logical), or less when the screen is smaller."""
+        w, h = 1480, 940
+        scr = self.screen() or QApplication.primaryScreen()
+        if scr is not None:
+            av = scr.availableGeometry()
+            w, h = min(w, int(av.width() * 0.94)), min(h, int(av.height() * 0.92))
+        self.resize(w, h)
+
+    def set_ui_size(self, name):
+        if name == self._ui_size():
+            return
+        if self.busy:
+            dialogs.inform(self, "Change the UI size after processing finishes.")
+            self.ui_size_actions[self._ui_size()].setChecked(True)
+            return
+        self.settings.setValue("ui_size", name)
+        self.settings.sync()
+        self.handoff = self._handoff_state()
+        self.player.stop()
+        self.autosave()
+        QApplication.instance().quit()   # app.main rebuilds the window at the new size
+
+    def _handoff_state(self):
+        rp = self.review_page
+        g = self.geometry()
+        s = self._scale()
+        return {
+            "stems": self.stems, "chops": self.chops, "queue": self.queue, "song": self.song,
+            "peaks": self._peaks, "finished": self._finished, "meta": self._meta(),
+            "undo": self.history.undo_stack, "redo": self.history.redo_stack,
+            "page": self.stack.currentIndex(),
+            "selected": rp.selected.id if rp.selected is not None else None,
+            "scroll": rp.scroll.verticalScrollBar().value(),
+            "export": getattr(self.export_page, "last_result", None),
+            "next": getattr(self.export_page, "last_next", None),
+            "state": "max" if self.isMaximized() else ("full" if self.isFullScreen() else "normal"),
+            "geom": (g.x() * s, g.y() * s, g.width() * s, g.height() * s),   # physical pixels
+        }
+
+    def _adopt(self, h):
+        """Take over the session from the window this one replaces."""
+        self.stems, self.chops, self.queue, self.song = h["stems"], h["chops"], h["queue"], h["song"]
+        self._peaks = h["peaks"]
+        self._finished = h["finished"]
+        self.history.undo_stack[:] = h["undo"]
+        self.history.redo_stack[:] = h["redo"]
+        m = h["meta"]
+        if m.get("base_dir") and os.path.isdir(m["base_dir"]):
+            self.base_dir = m["base_dir"]
+        self.load_page.set_song(m.get("artist", ""), m.get("song", ""))
+        if m.get("prefix_edited"):
+            self.load_page.prefix.setText(m.get("prefix", ""))
+            self.load_page.prefix_edited = True
+        self.load_page.refresh()
+        self.load_page.refresh_queue()
+        rp = self.review_page
+        rp.selected = next((c for c in self.chops if c.id == h["selected"]), None)
+        rp.rebuild()
+        if h.get("export"):
+            self.export_page.show_result(*h["export"])
+        if h.get("next"):
+            self.export_page.set_next(*h["next"])
+        self.update_steps()
+        self.go(h["page"])
+        sc = h.get("scroll", 0)
+        QTimer.singleShot(0, lambda: rp.scroll.verticalScrollBar().setValue(sc))
+
+    def show_initial(self, handoff=None):
+        """Show the window; after a UI size change keep its physical size and place."""
+        if not handoff:
+            self.show()
+            return
+        if handoff["state"] == "max":
+            self.showMaximized()
+            return
+        if handoff["state"] == "full":
+            self.showFullScreen()
+            return
+        s = self._scale()
+        x, y, w, h = (v / s for v in handoff["geom"])
+        scr = QApplication.screenAt(QPoint(int(x + 40), int(y + 40))) or QApplication.primaryScreen()
+        if scr is not None:
+            av = scr.availableGeometry()
+            w, h = min(w, av.width()), min(h, av.height())
+            x = max(av.left(), min(x, av.right() - w))
+            y = max(av.top(), min(y, av.bottom() - h))
+        self.resize(int(w), int(h))
+        self.show()
+        self.setGeometry(int(x), int(y), max(int(w), self.minimumWidth()),
+                         max(int(h), self.minimumHeight()))
+
+    def shutdown_threads(self):
+        self.player.stop()
+        for t in list(self.jobs) + list(self._checks):
+            try:
+                t.wait(3000)
+            except RuntimeError:
+                pass
 
     # ------------------------------------------------------------ helpers
     def stem_by_id(self, sid):
@@ -330,21 +461,79 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    # ---------------------------------------------------------- layout size
+    def _set_compact(self, narrow, short):
+        if getattr(self, "_compact", None) == (narrow, short):
+            return
+        self._compact = (narrow, short)
+        self.brand_lbl.setFont(K.font(22 if narrow else 28, 700, 3.5 if narrow else 5.0))
+        self.version_badge.setVisible(not narrow)
+        self.lcd.setMinimumWidth(130 if narrow else 220)
+        self.load_page.set_compact(narrow, short)
+        self.review_page.set_compact(narrow, short)
+        self.export_page.set_compact(narrow, short)
+
+    def measure_layout(self):
+        """Find how much room the full and the compact layouts need. The window may not shrink
+        below the compact layout, and switches to it exactly when the full one stops fitting,
+        so nothing is ever squeezed on top of something else."""
+        cur = getattr(self, "_compact", (False, False))
+        self._measuring = True
+        need = {}
+        for narrow in (False, True):
+            for short in (False, True):
+                self._set_compact(narrow, short)
+                ms = self._fresh_min()
+                need[(narrow, short)] = (ms.width(), ms.height())
+        self._full_w = max(need[(False, False)][0], need[(False, True)][0])
+        self._full_h = max(need[(False, False)][1], need[(True, False)][1])
+        mw = max(need[(True, True)][0], need[(True, False)][0])
+        mh = max(need[(True, True)][1], need[(False, True)][1])
+        self._set_compact(*cur)
+        self._measuring = False
+        self.setMinimumSize(QSize(mw, mh))
+        self._fit_layout()
+        return need
+
+    def request_measure(self):
+        """Content changed shape (queue shown, chops loaded...): re-check the room needed."""
+        if not hasattr(self, "_measure_timer"):
+            self._measure_timer = QTimer(self)
+            self._measure_timer.setSingleShot(True)
+            self._measure_timer.setInterval(60)
+            self._measure_timer.timeout.connect(
+                lambda: self.isVisible() and hasattr(self, "_full_w") and self.measure_layout())
+        self._measure_timer.start()
+
+    def _fresh_min(self):
+        """Minimum size of the central area with every nested layout recomputed now."""
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.sendPostedEvents()       # pending polish / geometry updates
+        c = self.centralWidget()
+        kids = c.findChildren(QWidget)
+        for w in kids:
+            w.updateGeometry()                    # drops each widget's cached size hints
+        lays = [w.layout() for w in [c] + kids if w.layout() is not None]
+        for lay in reversed(lays):          # children first
+            lay.invalidate()
+        for lay in reversed(lays):
+            lay.activate()
+        return c.minimumSizeHint()
+
+    def _fit_layout(self):
+        if not hasattr(self, "_full_w"):
+            return
+        self._set_compact(self.width() < self._full_w, self.height() < self._full_h)
+
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        narrow = self.width() < 1330
-        short = self.height() < 830
-        if getattr(self, "_compact", None) != (narrow, short):
-            self._compact = (narrow, short)
-            self.brand_lbl.setFont(K.font(24 if narrow else 31, 700, 3.5 if narrow else 5.5))
-            self.version_badge.setVisible(not narrow)
-            self.lcd.setMinimumWidth(150 if narrow else 230)
-            self.load_page.set_compact(narrow, short)
-            self.review_page.set_compact(narrow, short)
+        self._fit_layout()
 
     def showEvent(self, e):
         super().showEvent(e)
         self._style_title_bar()
+        if not hasattr(self, "_full_w"):
+            self.measure_layout()     # needs the widgets visible to get true sizes
 
     def toggle_theme(self):
         self.theme_name = "dark" if self.theme_btn.isChecked() else "light"

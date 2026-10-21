@@ -6,7 +6,8 @@ import math
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QDoubleSpinBox, QFrame,
-                               QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
+                               QHBoxLayout, QLabel, QSizePolicy, QSplitter, QSplitterHandle,
+                               QVBoxLayout, QWidget)
 
 from . import core as K
 from .core import C
@@ -315,6 +316,7 @@ class HwButton(QAbstractButton):
         self.px = px
         self.min_h = min_h
         self.icon_size = icon_size
+        self._floor_w = 0
         self.setCheckable(checkable)
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
@@ -340,10 +342,29 @@ class HwButton(QAbstractButton):
             w += self.icon_size + 10
         if self.led:
             w += 26
-        return QSize(int(w), self.min_h)
+        return QSize(int(max(w, self._floor_w)), self.min_h)
 
     def minimumSizeHint(self):
         return self.sizeHint()
+
+    def width_for(self, text):
+        """Width this button needs to show `text`."""
+        from PySide6.QtGui import QFontMetricsF
+        w = QFontMetricsF(self._font()).horizontalAdvance(text.upper()) + 34
+        if self.icon_name:
+            w += self.icon_size + 10
+        if self.led:
+            w += 26
+        return int(w + 1)
+
+    def setMinimumWidth(self, w):
+        """A floor for the width; the label always gets at least the room it needs."""
+        self._floor_w = int(w)
+        self.updateGeometry()
+
+    def setText(self, text):
+        super().setText(text)
+        self.updateGeometry()
 
     def enterEvent(self, e):
         self._hover = True
@@ -508,8 +529,11 @@ class LedToggle(QAbstractButton):
         fm = QFontMetricsF(K.font(12, 600, 1.4))
         w = 30 + fm.horizontalAdvance((self.label + "  " + (self.words[0] if self.show_state else "")).upper()) + 22
         if self.icon_name:
-            w += 24
+            w += 26
         return QSize(int(w), self.min_h)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
 
     def enterEvent(self, e):
         self._hover = True
@@ -564,7 +588,10 @@ class StepSelector(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumHeight(48)
-        self.setMinimumWidth(116 * len(names) + 16)
+        from PySide6.QtGui import QFontMetricsF
+        fm = QFontMetricsF(K.font(12, 600, 1.6))
+        cell = max(fm.horizontalAdvance(n.upper()) for n in names) + 34 + 18
+        self.setMinimumWidth(int(cell * len(names) + 4 * len(names) + 14))
 
     def set_current(self, i):
         self.current = i
@@ -740,7 +767,7 @@ class Knob(QWidget):
     released = Signal()
 
     def __init__(self, lo=0.0, hi=1.0, value=0.0, default=None, step=0.1, size=40, curve=1.0,
-                 parent=None):
+                 parent=None, pad=16):
         super().__init__(parent)
         self.lo, self.hi = float(lo), float(hi)
         self._v = float(value)
@@ -749,7 +776,7 @@ class Knob(QWidget):
         self.size_ = size
         self.curve = curve           # >1 gives finer control near lo
         self._drag = None
-        self.setFixedSize(size + 16, size + 16)
+        self.setFixedSize(size + pad, size + pad)
         self.setCursor(Qt.SizeVerCursor)
         self.setToolTip("Drag up/down (Shift = fine), scroll, double-click to reset")
 
@@ -833,12 +860,15 @@ class KnobTile(Tile):
 
     def __init__(self, label, lo, hi, suffix, default, step=1.0, decimals=1, curve=1.0,
                  tip=""):
-        super().__init__(margins=(14, 6, 12, 6))
+        super().__init__(margins=(14, 0, 10, 0))
+        self.setFixedHeight(K.H_ROW)
         self.title = cap(label, "on_dark", 11.5, 600, 1.6)
         self.lay.addWidget(self.title)
         self.lay.addStretch(1)
-        self.knob = Knob(lo, hi, default, default, step=step / (10 ** 0), size=36, curve=curve)
+        self.knob = Knob(lo, hi, default, default, step=step / (10 ** 0), size=32, curve=curve,
+                         pad=14)
         self.box = LcdSpin(lo, hi, suffix, decimals, step)
+        self.box.setFixedHeight(30)
         self.lay.addWidget(self.knob)
         self.lay.addWidget(self.box)
         if tip:
@@ -850,8 +880,9 @@ class KnobTile(Tile):
 
     def set_compact(self, on):
         self.title.setFont(K.font(10.5 if on else 11.5, 600, 1.0 if on else 1.6, caps=True))
-        self.box.setFixedWidth(72 if on else 86)
-        self.lay.setContentsMargins(10 if on else 14, 6, 8 if on else 12, 6)
+        self.box.setFixedWidth(70 if on else 84)
+        self.lay.setSpacing(4 if on else 8)
+        self.lay.setContentsMargins(10 if on else 14, 0, 6 if on else 10, 0)
 
     def _from_knob(self, v):
         if self._sync:
@@ -1247,3 +1278,139 @@ class LogoMark(QWidget):
         p = QPainter(self)
         paint_logo(p, QRectF(self.rect()), plate=False)
         p.end()
+
+
+# ===================================================================== divider
+class _GripHandle(QSplitterHandle):
+    """Engraved slot across the chassis with a cream grip in the middle."""
+
+    def __init__(self, orientation, parent):
+        super().__init__(orientation, parent)
+        self.setCursor(Qt.SplitVCursor)
+        self.setAttribute(Qt.WA_Hover)
+        self._hover = False
+        self.setToolTip("Drag to give the editor or the list more room. "
+                        "Drag all the way up to hide the editor. Double-click to reset.")
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def mouseDoubleClickEvent(self, e):
+        self.splitter().reset_split()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(self.rect())
+        cy = r.center().y()
+        collapsed = self.splitter().editor_hidden()
+        gw, gh = 72.0, 10.0
+        grip = QRectF(r.center().x() - gw / 2, cy - gh / 2, gw, gh)
+        # engraved slot either side of the grip
+        for x0, x1 in ((r.left() + 14, grip.left() - 10), (grip.right() + 10, r.right() - 14)):
+            if x1 - x0 < 8:
+                continue
+            p.setPen(QPen(C("chassis_lo", 200), 1))
+            p.drawLine(QPointF(x0, cy - 0.5), QPointF(x1, cy - 0.5))
+            p.setPen(QPen(C("chassis_hi", 200), 1))
+            p.drawLine(QPointF(x0, cy + 0.5), QPointF(x1, cy + 0.5))
+        K.soft_shadow(p, grip, 3, 2, 70, 1.2)
+        g = QLinearGradient(grip.topLeft(), grip.bottomLeft())
+        g.setColorAt(0, QColor("#FFFFFF") if self._hover else QColor(K.pal()["key_hi"]))
+        g.setColorAt(1, QColor(K.pal()["key_lo"]))
+        p.setBrush(g)
+        p.setPen(QPen(QColor(20, 18, 16, 200), 1))
+        p.drawRoundedRect(grip, 3, 3)
+        p.setPen(QPen(QColor(40, 36, 32, 170), 1.1))
+        for dx in (-9, -3, 3, 9):
+            x = grip.center().x() + dx
+            p.drawLine(QPointF(x, grip.top() + 2.5), QPointF(x, grip.bottom() - 2.5))
+        if collapsed:
+            f = K.font(10.5, 600, 1.8, caps=True)
+            K.text(p, QRectF(grip.right() + 18, r.top(), 420, r.height()),
+                   "EDITOR HIDDEN · DRAG DOWN OR DOUBLE-CLICK TO SHOW", f, C("chassis_text"))
+
+
+class PanelSplitter(QSplitter):
+    """Vertical divider between the trim editor (top) and the chop list (bottom).
+    The top panel can be collapsed completely; double-click the grip to reset."""
+
+    def __init__(self, default_top=0.46, parent=None):
+        super().__init__(Qt.Vertical, parent)
+        self.default_top = default_top
+        self.setHandleWidth(18)
+        self.setChildrenCollapsible(False)
+        self.setOpaqueResize(True)
+
+    def createHandle(self):
+        return _GripHandle(self.orientation(), self)
+
+    def editor_hidden(self):
+        sz = self.sizes()
+        return bool(sz) and sz[0] == 0
+
+    def top_fraction(self):
+        sz = self.sizes()
+        tot = sum(sz)
+        return sz[0] / tot if tot else self.default_top
+
+    def set_top_fraction(self, f):
+        tot = sum(self.sizes()) or max(1, self.height() - self.handleWidth())
+        if f <= 0:
+            self.setSizes([0, tot])
+            return
+        top = self.widget(0)
+        bottom = self.widget(1)
+        t = max(top.minimumSizeHint().height(), int(tot * f))
+        t = min(t, tot - bottom.minimumSizeHint().height())
+        self.setSizes([t, tot - t])
+
+    def reset_split(self):
+        self.set_top_fraction(self.default_top)
+        self.splitterMoved.emit(self.sizes()[0], 1)
+
+
+class ElidedLabel(QLabel):
+    """One-line label that shortens itself with … instead of pushing the layout wider."""
+
+    def __init__(self, text="", color_key="on_dark", px=13, weight=400, spacing=0.3):
+        super().__init__()
+        self._full = ""
+        self.setFont(K.font(px, weight, spacing))
+        recolor(self, color_key)
+        self._min_w = 40
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self.setText(text)
+
+    def setMinimumWidth(self, w):
+        self._min_w = int(w)
+        self.updateGeometry()
+
+    def sizeHint(self):
+        fm = self.fontMetrics()
+        return QSize(max(self._min_w, int(fm.horizontalAdvance(self._full)) + 4),
+                     super().sizeHint().height())
+
+    def minimumSizeHint(self):
+        return QSize(self._min_w, super().minimumSizeHint().height())
+
+    def setText(self, text):
+        self._full = text or ""
+        self._elide()
+        self.updateGeometry()
+
+    def text_full(self):
+        return self._full
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._elide()
+
+    def _elide(self):
+        fm = self.fontMetrics()
+        QLabel.setText(self, fm.elidedText(self._full, Qt.ElideRight, max(10, self.width() - 2)))

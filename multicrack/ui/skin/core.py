@@ -56,6 +56,16 @@ def C(key: str, alpha: int | None = None) -> QColor:
     return c
 
 
+# ------------------------------------------------------------------ metrics
+# One height scale for every control, so rows line up across pages.
+H_TOP = 60     # top bar: brand plate, step selector, tempo LCD, theme lever, menu
+H_ROW = 50     # control tiles and switches (Review editor rows)
+H_KEY = 40     # main keys (Undo / Redo / Approve all / Export, Browse, Open folder ...)
+H_FIELD = 34   # text fields and the square buttons beside them
+H_SMALL = 30   # small inline buttons (table rows, group headers, zoom)
+RADIUS = 4
+
+
 # --------------------------------------------------------------------- fonts
 FAMILY = "IBM Plex Mono"
 _fonts_loaded = {"done": False}

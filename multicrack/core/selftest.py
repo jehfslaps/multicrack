@@ -109,6 +109,30 @@ def run(gui=True) -> int:
             w.toggle_theme()
             from ..ui.skin import core as SK
             assert SK.FAMILY == "IBM Plex Mono", f"bundled font missing ({SK.FAMILY})"
+            # layout: the window measures the room it needs once shown
+            w.show()
+            app.processEvents()
+            assert hasattr(w, "_full_w") and w.minimumWidth() >= 800, "layout not measured"
+            # divider between the editor and the list
+            w.go(1)
+            app.processEvents()
+            sp = w.review_page.split
+            sp.set_top_fraction(0)
+            assert sp.editor_hidden(), "editor did not collapse"
+            sp.reset_split()
+            assert not sp.editor_hidden(), "editor did not come back"
+            # UI size: rebuild the whole app at another scale, keeping the session
+            from ..app import make_app, teardown
+            n1, dpr0 = len(w.chops), w.devicePixelRatioF()
+            h = w._handoff_state()
+            teardown(app, w)
+            del w, app
+            app = make_app(0.75)
+            w = MainWindow(handoff=h)
+            w.show_initial(h)
+            app.processEvents()
+            assert len(w.chops) == n1, "chops lost on UI size change"
+            assert w.devicePixelRatioF() < dpr0, "UI size did not change"
             w.autosave_path = os.path.join(out, "autosave.xenakis")
             w.autosave()
             assert os.path.exists(w.autosave_path)

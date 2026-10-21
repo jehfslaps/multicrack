@@ -5,6 +5,13 @@ from . import core
 from .qss import stylesheet
 
 
+def reset_caches():
+    """Forget pixmaps and fonts tied to the current QApplication (before it is rebuilt)."""
+    core._tex_cache.clear()
+    core._knob_cache.clear()
+    core._fonts_loaded["done"] = False
+
+
 def apply(mode: str):
     """Switch light/dark: palette, stylesheet and a full repaint."""
     core.load_fonts()

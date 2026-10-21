@@ -33,7 +33,7 @@ def _table(columns, widths, stretch_col):
     t.setShowGrid(False)
     t.setSelectionMode(QAbstractItemView.NoSelection)
     t.setFocusPolicy(Qt.NoFocus)
-    t.verticalHeader().setDefaultSectionSize(46)
+    t.verticalHeader().setDefaultSectionSize(44)
     t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     t.setFont(K.font(13.5, 400, 0.3))
     return t
@@ -87,7 +87,7 @@ class LoadPage(QWidget):
         self.prefix.setToolTip("Every file name starts with this. Filled in from the artist and "
                                "song; type to change it.")
         pr.addWidget(self.prefix, 1)
-        self.prefix_btn = W.HwButton("", "icon", icon="pencil", min_h=36)
+        self.prefix_btn = W.HwButton("", "icon", icon="pencil", min_h=K.H_FIELD)
         self.prefix_btn.setToolTip("Edit the prefix")
         self.prefix_btn.clicked.connect(lambda: (self.prefix.setFocus(), self.prefix.selectAll()))
         pr.addSpacing(6)
@@ -100,14 +100,14 @@ class LoadPage(QWidget):
         self.folder_edit.setReadOnly(True)
         self.folder_edit.setFont(K.font(12.5, 400, 0.2))
         orow.addWidget(self.folder_edit, 1)
-        self.folder_btn = W.HwButton("", "icon", icon="folder", min_h=36)
+        self.folder_btn = W.HwButton("", "icon", icon="folder", min_h=K.H_FIELD)
         self.folder_btn.setToolTip("Choose where song folders go")
         self.folder_btn.clicked.connect(self.pick_base)
         orow.addSpacing(6)
         orow.addWidget(self.folder_btn)
         sl.addLayout(orow)
         crow = QHBoxLayout()
-        self.change_folder = W.HwButton("Change location", "dark", min_h=32, px=11.5)
+        self.change_folder = W.HwButton("Change location", "dark", min_h=K.H_SMALL, px=11.5)
         self.change_folder.clicked.connect(self.pick_base)
         crow.addWidget(self.change_folder)
         crow.addStretch(1)
@@ -145,8 +145,8 @@ class LoadPage(QWidget):
         dl.addWidget(self.drop, 1)
         bcol = QVBoxLayout()
         bcol.setSpacing(12)
-        self.browse_files_btn = W.HwButton("Browse files", "dark", icon="file", min_h=46, px=12.5)
-        self.browse_folder_btn = W.HwButton("Browse folder", "dark", icon="folder", min_h=46, px=12.5)
+        self.browse_files_btn = W.HwButton("Browse files", "dark", icon="file", min_h=K.H_KEY, px=12.5)
+        self.browse_folder_btn = W.HwButton("Browse folder", "dark", icon="folder", min_h=K.H_KEY, px=12.5)
         for b in (self.browse_files_btn, self.browse_folder_btn):
             b.setMinimumWidth(236)
             bcol.addWidget(b)
@@ -159,6 +159,7 @@ class LoadPage(QWidget):
         self.stems_outline = W.Outline(margins=(4, 2, 4, 4))
         self.table = _table(["#", "File name", "Length", "AI detected", "Auto / Manual", "Status",
                              "Edit", "Remove"], [40, 0, 72, 176, 158, 118, 150, 76], 1)
+        self.table.setMinimumHeight(38 + 44 * 2 + 4)     # always room for two stems
         self.stems_outline.lay.addWidget(self.table)
         self.empty = W.mono("NO FILES YET  ·  DROP A STEM FOLDER ABOVE TO GET STARTED",
                             "on_dark_dim", 12.5, 500, 2.0)
@@ -171,7 +172,7 @@ class LoadPage(QWidget):
         self.queue_mod = W.Module("SONG QUEUE", margins=(14, 8, 14, 14))
         qo = W.Outline(margins=(4, 2, 4, 4))
         self.queue_table = _table(["#", "Artist - Song", "Status", "Actions"], [44, 0, 160, 300], 1)
-        self.queue_table.setMaximumHeight(38 + 46 * 3 + 4)
+        self.queue_table.setMaximumHeight(38 + 44 * 3 + 4)
         qo.lay.addWidget(self.queue_table)
         self.queue_mod.lay.addWidget(qo)
         self.queue_mod.hide()
@@ -194,7 +195,7 @@ class LoadPage(QWidget):
         self.progress.setMaximumWidth(520)
         foot.addWidget(self.progress, 2)
         housing = W.Recess(screws=True, margins=(16, 10, 16, 10))
-        self.process_btn = W.HwButton("Process all", "red", led=True, min_h=54, px=17)
+        self.process_btn = W.HwButton("Process all", "red", led=True, min_h=52, px=16)
         self.process_btn.setMinimumWidth(300)
         housing.lay.addWidget(self.process_btn)
         foot.addWidget(housing)
@@ -271,6 +272,7 @@ class LoadPage(QWidget):
         self._names_changed()
 
     def refresh_queue(self):
+        self.win.request_measure()
         q = self.win.queue
         t = self.queue_table
         t.setRowCount(len(q))
@@ -285,16 +287,16 @@ class LoadPage(QWidget):
             al = QHBoxLayout(acts)
             al.setContentsMargins(4, 5, 4, 5)
             al.setSpacing(10)
-            b1 = W.HwButton("Start this song", "dark", icon="play", min_h=34, px=11.5, icon_size=13)
+            b1 = W.HwButton("Start this song", "dark", icon="play", min_h=K.H_SMALL, px=11.5, icon_size=13)
             b1.clicked.connect(lambda _c=False, i=i: self.win.next_song(i))
-            b2 = W.HwButton("Remove", "dark", icon="x", min_h=34, px=11.5, icon_size=13)
+            b2 = W.HwButton("Remove", "dark", icon="x", min_h=K.H_SMALL, px=11.5, icon_size=13)
             b2.clicked.connect(lambda _c=False, i=i: self.win.remove_from_queue(i))
             al.addWidget(b1)
             al.addWidget(b2)
             al.addStretch(1)
             t.setCellWidget(i, 3, acts)
         rows = min(3, max(1, len(q)))
-        t.setFixedHeight(38 + 46 * rows + 4)
+        t.setFixedHeight(38 + 44 * rows + 4)
         self.queue_mod.setVisible(bool(q))
         self.queue_mod.set_title(f"SONG QUEUE  ·  {len(q)} WAITING" if q else "SONG QUEUE")
 
@@ -366,7 +368,7 @@ class LoadPage(QWidget):
                 narrow = getattr(self, "_compact", (False, False))[0]
                 text = ("Loops" if is_groove else "Edit") if narrow else \
                     ("Loop options" if is_groove else "Edit regions")
-                b = W.HwButton(text, "dark", min_h=32, px=11)
+                b = W.HwButton(text, "dark", min_h=K.H_SMALL, px=11)
                 b.setToolTip("Loop options" if is_groove else "Edit regions")
                 b.setFixedWidth(self.table.columnWidth(6) - 12)
                 b.clicked.connect(lambda _c=False, s=st: self.win.open_stem(s))

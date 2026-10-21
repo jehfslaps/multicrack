@@ -32,7 +32,8 @@ class HwDialog(QDialog):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.title = title
         self._drag = None
-        self.setMinimumSize(*min_size)
+        self._pref = min_size          # preferred size; shrinks to fit small screens
+        self._sized = False
         outer = QVBoxLayout(self)
         f = self.FRAME
         outer.setContentsMargins(f + 18, f + self.TITLE_H + 8, f + 18, f + 28)
@@ -42,6 +43,31 @@ class HwDialog(QDialog):
         self.close_btn.setParent(self)
         self.close_btn.clicked.connect(self.reject)
         self.close_btn.setToolTip("Close (Esc)")
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if self._sized:
+            return
+        self._sized = True
+        from PySide6.QtWidgets import QApplication
+        scr = self.screen() or QApplication.primaryScreen()
+        w, h = self._pref
+        if scr is not None:
+            av = scr.availableGeometry()
+            w, h = min(w, int(av.width() * 0.96)), min(h, int(av.height() * 0.94))
+        ms = self.minimumSizeHint()
+        w, h = max(w, ms.width()), max(h, ms.height())
+        self.resize(w, h)
+        par = self.parentWidget()
+        if par is not None:
+            c = par.window().frameGeometry().center()
+            g = self.frameGeometry()
+            g.moveCenter(c)
+            if scr is not None:
+                av = scr.availableGeometry()
+                g.moveTop(max(av.top(), min(g.top(), av.bottom() - g.height())))
+                g.moveLeft(max(av.left(), min(g.left(), av.right() - g.width())))
+            self.move(g.topLeft())
 
     def resizeEvent(self, e):
         f = self.FRAME
@@ -119,7 +145,7 @@ class MessageDialog(HwDialog):
         row.addStretch(1)
         self.result_key = None
         for key, text, variant in buttons:
-            b = HwButton(text, variant, min_h=38, px=12.5)
+            b = HwButton(text, variant, min_h=K.H_KEY, px=12.5)
             b.clicked.connect(lambda _c=False, k=key: self._done(k))
             row.addWidget(b)
         self.body.addLayout(row)

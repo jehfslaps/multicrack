@@ -33,7 +33,8 @@ class ExportPage(QWidget):
         col = QVBoxLayout()
         col.setSpacing(0)
         box = W.Module("EXPORT", margins=(22, 10, 22, 18))
-        box.setMinimumWidth(820)
+        box.setMinimumWidth(640)
+        self.box = box
         box.setMaximumWidth(980)
         bl = box.lay
         bl.setSpacing(14)
@@ -69,7 +70,7 @@ class ExportPage(QWidget):
         self.list.setSelectionMode(QAbstractItemView.NoSelection)
         self.list.setFocusPolicy(Qt.NoFocus)
         self.list.setFont(K.font(13, 400, 0.3))
-        self.list.setMinimumHeight(330)
+        self.list.setMinimumHeight(220)
         outline.lay.addWidget(self.list)
         bl.addWidget(outline, 1)
         bl.addWidget(W.cap("24-bit WAV  ·  original sample rate  ·  normalized −0.1 dB  ·  "
@@ -77,13 +78,13 @@ class ExportPage(QWidget):
         row = QHBoxLayout()
         row.setSpacing(12)
         row.addStretch(1)
-        self.again = W.HwButton("Chop another song", "dark", min_h=44)
+        self.again = W.HwButton("Chop another song", "dark", min_h=K.H_KEY)
         self.again.clicked.connect(self.win.start_over)
         row.addWidget(self.again)
-        self.open = W.HwButton("Open folder", "key", icon="folder", min_h=44)
+        self.open = W.HwButton("Open folder", "key", icon="folder", min_h=K.H_KEY)
         self.open.clicked.connect(lambda: self.folder and open_folder(self.folder))
         row.addWidget(self.open)
-        self.next_btn = W.HwButton("", "red", icon="play", min_h=44)
+        self.next_btn = W.HwButton("", "red", icon="play", min_h=K.H_KEY)
         self.next_btn.clicked.connect(lambda: self.win.next_song(0))
         self.next_btn.hide()
         row.addWidget(self.next_btn)
@@ -93,9 +94,15 @@ class ExportPage(QWidget):
         outer.addStretch(1)
         self.show_result([], "")
 
+    def set_compact(self, narrow, short):
+        self.list.setMinimumHeight(140 if short else 220)
+
     def set_next(self, name, waiting):
+        self.last_next = (name, waiting)
         if name:
-            self.next_btn.setText(f"Next song: {name}" + (f"  ({waiting} in queue)" if waiting > 1 else ""))
+            short = name if len(name) <= 34 else name[:33] + "…"
+            self.next_btn.setText(f"Next song: {short}" + (f"  ({waiting} in queue)" if waiting > 1 else ""))
+            self.next_btn.setToolTip(f"Load {name}")
             self.next_btn.show()
             self.again.hide()
         else:
@@ -103,6 +110,7 @@ class ExportPage(QWidget):
             self.again.show()
 
     def show_result(self, files, folder):
+        self.last_result = (list(files), folder)
         self.folder = folder
         self.icon.setVisible(bool(files))
         self.title.setText(f"EXPORTED {len(files)} FILE{'S' if len(files) != 1 else ''}"

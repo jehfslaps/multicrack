@@ -26,9 +26,16 @@ No install needed. The first time, Windows may show "Windows protected your PC":
      section. Scroll to zoom (all the way out to the whole stem), Shift+scroll to move.
      A playhead shows what's playing; loops repeat so you can hear the seam.
    - Per stem: Approve all / Remove all.
+   - Drag the grip between the editor and the list to give either one more room. Drag it all
+     the way up to hide the editor and see only the list; double-click it to reset. The app
+     remembers where you left it.
 3. **Export:** all files land in one folder on your Desktop, for example
    `Taylor Swift - Style (Chopped)`, named like `TS_Style_Kick_01.wav`. With a queue, the next
    song loads with one click.
+
+Menu › UI size picks Small, Medium (default) or Large. Everything scales together and the change
+applies right away without losing your work. Make the window as small as you like: below a
+certain width the layout switches to a compact version, and it never lets controls overlap.
 
 Your work is saved automatically. If the app closes, it offers to pick up where you left off.
 Menu › Save session as… / Open session… keep a session as a file (`.xenakis`). Xenakis checks for new
