@@ -18,9 +18,11 @@ No install needed. The first time, Windows may show "Windows protected your PC":
    change the type from the dropdown, and give it a thumbs up. When everything is green, export.
    - Per chop: fade in / fade out, reverse, gain (turn down from full level), smooth loop seam,
      clone, delete. Drag any row straight into FL Studio.
-   - Trim editor: scroll to zoom (all the way out to the whole stem), Shift+scroll to move,
-     drag across the waveform to pick a new section. A playhead shows what's playing; loops
-     repeat so you can hear the seam.
+   - Trim editor: click anywhere to play the stem from that spot (Space stops). Drag the flags
+     to trim, or drag the grab bar between them to slide the whole selection at the same length
+     (loops stay on the bar grid while Snap is on). Drag across the waveform to pick a new
+     section. Scroll to zoom (all the way out to the whole stem), Shift+scroll to move.
+     A playhead shows what's playing; loops repeat so you can hear the seam.
    - Per stem: Approve all / Remove all.
 3. **Export:** all files land in one folder on your Desktop, for example
    `Taylor Swift - Style (Chopped)`, named like `TS_Style_Kick_01.wav`. With a queue, the next

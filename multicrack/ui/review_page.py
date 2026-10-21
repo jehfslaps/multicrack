@@ -310,6 +310,7 @@ class ReviewPage(QWidget):
         tl.addLayout(th)
         self.editor = TrimEditor()
         self.editor.changed.connect(self._trimmed)
+        self.editor.seekRequested.connect(self.play_from)
         self.editor.selectionChanged.connect(lambda s, e: self._update_readout(s, e))
         tl.addWidget(self.editor, 1)
         self.ed_scroll = QScrollBar(Qt.Horizontal)
@@ -577,7 +578,7 @@ class ReviewPage(QWidget):
 
     def _loop_toggled(self, on):
         self.win.settings.setValue("loop_play", "true" if on else "false")
-        if self.win.player.playing_id is not None:
+        if self.selected is not None and self.win.player.playing_id == self.selected.id:
             self.play_selected()
 
     def _reverse_toggled(self, on):
@@ -845,6 +846,19 @@ class ReviewPage(QWidget):
             if not self.ed_snap.isChecked() or chop.kind == "loop":
                 return s           # loops stay where you put them (bar lines are yours to move)
             return magnet_to_hit(st, s)
+
+        def snap_move(s, st=st, chop=chop):
+            """Moving a loop with Snap on keeps it on the bar grid."""
+            if not self.ed_snap.isChecked() or chop.kind != "loop":
+                return s
+            grid = st.analysis.get("grid") or {}
+            bpm = float(st.options.get("bpm") or grid.get("bpm") or 0)
+            if bpm <= 0:
+                return s
+            bar = 240.0 * st.sr / bpm
+            d0 = float(grid.get("downbeat", 0)) % bar
+            return int(round(d0 + round((s - d0) / bar) * bar))
+        self.editor.snap_move = snap_move if chop.kind == "loop" else None
         self.editor.set_chop(self.win.peaks(st), st.frames, st.sr, chop.start, chop.end, snap,
                              keep_view=self.editor.is_whole())
         self._view_changed(self.editor.view_a, self.editor.view_b)
@@ -883,10 +897,21 @@ class ReviewPage(QWidget):
 
     # ------------------------------------------------------------ playback
     def toggle_play(self):
-        if self.selected is not None and self.win.player.playing_id == self.selected.id:
+        if self.win.player.playing_id is not None:
             self.win.player.stop()
         else:
             self.play_selected()
+
+    def play_from(self, s):
+        """Play the whole stem from a clicked spot (until stopped). The selection is untouched."""
+        c = self.selected
+        if c is None:
+            return
+        st = self.win.stem_by_id(c.stem_id)
+        s = int(max(0, min(st.frames - 1, s)))
+        if not self.win.player.play(st.audio[s:], st.sr, ("seek", st.id, s)):
+            self.win.status(self.win.player.error or "")
+        self.setFocus()
 
     def play_selected(self):
         c = self.selected
@@ -911,10 +936,18 @@ class ReviewPage(QWidget):
         if row is not None:
             c = row.chop
             row.wave.set_playhead(min(1.0, pos / max(1, c.length)))
-        if playing and self.selected is not None and p.playing_id == self.selected.id:
+        pid = p.playing_id
+        if playing and self.selected is not None and pid == self.selected.id:
             c = self.selected
             s = (c.end - pos) if c.reverse else (c.start + pos)
             self.editor.set_playhead(s)
+        elif (playing and self.selected is not None and isinstance(pid, tuple)
+              and pid[1] == self.selected.stem_id):
+            self.editor.set_playhead(pid[2] + pos)
+            if pid[2] + pos > self.editor.view_b and self.editor.drag is None:
+                span = self.editor.view_b - self.editor.view_a
+                self.editor.set_view(pid[2] + pos - int(span * 0.1),
+                                     pid[2] + pos + int(span * 0.9))   # follow the playhead
         else:
             self.editor.set_playhead(None)
 

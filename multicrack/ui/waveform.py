@@ -184,13 +184,15 @@ class MiniWave(QWidget):
 class TrimEditor(QWidget):
     """Large waveform of one chop with draggable start / end markers.
 
-    Zoom with the wheel (or the page's buttons) all the way out to the whole stem.
-    Drag a marker to trim, or drag across the waveform to select a new section."""
+    Click anywhere to play the stem from that spot. Drag a marker to trim, drag the grab bar
+    between the markers to move the whole selection (same length), or drag across the waveform
+    to select a new section. Zoom with the wheel all the way out to the whole stem."""
     changed = Signal(int, int)
     viewChanged = Signal(int, int)
     selectionChanged = Signal(int, int)
+    seekRequested = Signal(int)
 
-    TOP = 16       # marker triangles
+    TOP = 24       # marker triangles + grab bar
     RULER = 24     # time labels
 
     def __init__(self, parent=None):
@@ -204,6 +206,8 @@ class TrimEditor(QWidget):
         self.drag = None
         self.sr = 44100
         self.snap = None   # callable(sample) -> sample
+        self.snap_move = None   # callable(start) -> start, applied while moving the selection
+        self._hover_handle = False
         self.fade_in = 0   # samples (drawn as ramps)
         self.fade_out = 0
         self.reverse = False
@@ -316,6 +320,23 @@ class TrimEditor(QWidget):
             p.drawLine(QPointF(xs, area.bottom()), QPointF(self._x(self.start + fi), area.top()))
         if fo > 0:
             p.drawLine(QPointF(self._x(self.end - fo), area.top()), QPointF(xe, area.bottom()))
+        # region bar + grab handle (drag to move the whole selection)
+        top = r.top() + 3
+        bar = QColor(MARK)
+        bar.setAlpha(70)
+        p.fillRect(QRectF(xs, top + 5, max(0, xe - xs), 5), bar)
+        hr = self._handle_rect()
+        g = QLinearGradient(hr.topLeft(), hr.bottomLeft())
+        moving = isinstance(self.drag, tuple) and self.drag[0] == "move"
+        g.setColorAt(0, QColor("#FFFFFF") if (self._hover_handle or moving) else QColor("#F2EEE6"))
+        g.setColorAt(1, QColor("#BDB5A7"))
+        p.setPen(QPen(QColor(0, 0, 0, 200), 1))
+        p.setBrush(g)
+        p.drawRoundedRect(hr, 3, 3)
+        p.setPen(QPen(QColor(40, 36, 32, 200), 1.2))
+        cx = hr.center().x()
+        for dx in (-6, -2, 2, 6):
+            p.drawLine(QPointF(cx + dx, hr.top() + 3.5), QPointF(cx + dx, hr.bottom() - 3.5))
         # markers
         for x in (xs, xe):
             p.setPen(QPen(MARK, 1.8))
@@ -355,6 +376,13 @@ class TrimEditor(QWidget):
         else:
             self.zoom(0.8 if dy > 0 else 1.25, self._s(e.position().x()))
 
+    def _handle_rect(self):
+        r, _a = self._area()
+        xs, xe = self._x(self.start), self._x(self.end)
+        w = 44.0
+        cx = (xs + xe) / 2
+        return QRectF(cx - w / 2, r.top() + 2, w, 15)
+
     def _near(self, x):
         ds, de = abs(x - self._x(self.start)), abs(x - self._x(self.end))
         if min(ds, de) < 10:
@@ -364,16 +392,44 @@ class TrimEditor(QWidget):
     def mousePressEvent(self, e):
         if self.cache is None:
             return
-        x = e.position().x()
+        pos = e.position()
+        x = pos.x()
         part = self._near(x)
-        if part:
+        near_edge = min(abs(x - self._x(self.start)), abs(x - self._x(self.end))) < 5
+        if self._handle_rect().adjusted(-3, -2, 3, 3).contains(pos) and not near_edge:
+            _r, area = self._area()
+            spp = (self.view_b - self.view_a) / max(1.0, area.width())   # samples per pixel
+            self.drag = ("move", x, self.start, self.end, spp)
+            self.setCursor(Qt.ClosedHandCursor)
+            self.update()
+        elif part:
             self.drag = part
         else:
             s = max(0, min(self.n, self._s(x)))
             self.drag = ("new", s)
 
+    def _move_to(self, x):
+        _k, x_press, a0, b0, spp = self.drag
+        length = b0 - a0
+        # the selection follows the mouse 1:1 at the zoom level the drag started with
+        ns = int(max(0, min(self.n - length, a0 + (x - x_press) * spp)))
+        if self.snap_move:
+            ns = int(max(0, min(self.n - length, self.snap_move(ns))))
+        self.start, self.end = ns, ns + length
+        # keep the selection in view while sweeping through the stem
+        span = self.view_b - self.view_a
+        if self.end > self.view_b and span < self.n:
+            self.set_view(self.end - span + int(span * 0.05), self.end + int(span * 0.05))
+        elif self.start < self.view_a and span < self.n:
+            self.set_view(self.start - int(span * 0.05), self.start - int(span * 0.05) + span)
+
     def mouseMoveEvent(self, e):
         x = e.position().x()
+        if isinstance(self.drag, tuple) and self.drag[0] == "move":
+            self._move_to(x)
+            self.update()
+            self.selectionChanged.emit(self.start, self.end)
+            return
         if self.drag:
             s = max(0, min(self.n, self._s(x)))
             if isinstance(self.drag, tuple):
@@ -388,15 +444,42 @@ class TrimEditor(QWidget):
             self.update()
             self.selectionChanged.emit(self.start, self.end)
         elif self.cache is not None:
-            self.setCursor(Qt.SizeHorCursor if self._near(x) else Qt.IBeamCursor)
+            over = self._handle_rect().adjusted(-3, -2, 3, 3).contains(e.position()) and \
+                min(abs(x - self._x(self.start)), abs(x - self._x(self.end))) >= 5
+            if over != self._hover_handle:
+                self._hover_handle = over
+                self.update()
+            self.setCursor(Qt.OpenHandCursor if over else
+                           Qt.SizeHorCursor if self._near(x) else Qt.PointingHandCursor)
+            self.setToolTip("Drag to move the whole selection (same length)" if over else
+                            "Click to play from here · drag to select a new section"
+                            if not self._near(x) else "Drag to trim")
+
+    def leaveEvent(self, _e):
+        if self._hover_handle:
+            self._hover_handle = False
+            self.update()
 
     def mouseReleaseEvent(self, _e):
         d = self.drag
         self.drag = None
         if not d:
             return
+        if isinstance(d, tuple) and d[0] == "move":
+            if (self.start, self.end) == (d[2], d[3]):
+                self.update()
+                return
+            if self.snap and not self.snap_move:
+                length = self.end - self.start
+                ns = int(max(0, min(self.n - length, self.snap(self.start))))
+                self.start, self.end = ns, ns + length
+            self.setCursor(Qt.OpenHandCursor)
+            self.update()
+            self.changed.emit(self.start, self.end)
+            return
         if isinstance(d, tuple) and len(d) < 3:
-            return          # a plain click on the waveform: keep the current selection
+            self.seekRequested.emit(int(d[1]))   # a plain click: play from here
+            return
         if (d == "start" or isinstance(d, tuple)) and self.snap:
             self.start = int(self.snap(self.start))
             self.start = min(self.start, self.end - int(0.005 * self.sr))
