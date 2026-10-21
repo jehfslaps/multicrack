@@ -193,12 +193,17 @@ class ReviewPage(QWidget):
         self.ed_reset = QPushButton("Reset trim")
         self.ed_reset.clicked.connect(self.reset_trim)
         er.addWidget(self.ed_reset)
-        self.ed_snap = QCheckBox("Snap start to the hit")
-        self.ed_snap.setToolTip("When on, a start dropped within about 12 ms of a hit lines up "
-                                "with its attack. Turn off for completely free trimming.")
+        self.ed_snap = QToolButton()
+        self.ed_snap.setObjectName("seg")
+        self.ed_snap.setCheckable(True)
+        self.ed_snap.setMinimumHeight(34)
+        self.ed_snap.setMinimumWidth(96)
+        self.ed_snap.setToolTip("Snap (S key). On: a start flag dropped within about 12 ms of a "
+                                "hit lines up with its attack. Off: the flags stay exactly where "
+                                "you drop them, no snapping at all.")
+        self.ed_snap.toggled.connect(self._snap_toggled)
         self.ed_snap.setChecked(self.win.settings.value("snap_trim", "true") == "true")
-        self.ed_snap.toggled.connect(
-            lambda on: self.win.settings.setValue("snap_trim", "true" if on else "false"))
+        self._snap_toggled(self.ed_snap.isChecked())
         er.addSpacing(8)
         er.addWidget(self.ed_snap)
         er.addSpacing(12)
@@ -319,6 +324,10 @@ class ReviewPage(QWidget):
         self.approve_all.setEnabled(n > 0 and not done)
         self.win.update_steps()
 
+    def _snap_toggled(self, on):
+        self.ed_snap.setText("Snap: On" if on else "Snap: Off")
+        self.win.settings.setValue("snap_trim", "true" if on else "false")
+
     # ------------------------------------------------- keyboard, delete, clone
     def keyPressEvent(self, e):
         k, mods = e.key(), e.modifiers()
@@ -332,6 +341,8 @@ class ReviewPage(QWidget):
             self.delete_chop(self.selected)
         elif k == Qt.Key_D and mods & Qt.ControlModifier and self.selected is not None:
             self.clone_chop(self.selected)
+        elif k == Qt.Key_S and not mods & Qt.ControlModifier:
+            self.ed_snap.toggle()
         elif k in (Qt.Key_Return, Qt.Key_Enter) and self.selected is not None:
             row = self.rows.get(self.selected.id)
             if row:
