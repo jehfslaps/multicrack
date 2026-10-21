@@ -4,13 +4,15 @@ from __future__ import annotations
 from dataclasses import replace
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QHBoxLayout, QHeaderView,
-                               QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QTableWidget,
+                               QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..core.audio import render_chop
 from ..core.model import Chop
-from .common import (fmt_time, label, label_combo, magnet_to_hit, panel, snap_to_sound,
-                     trim_tail)
+from .common import fmt_time, label_combo, magnet_to_hit, snap_to_sound, trim_tail
+from .skin import core as K
+from .skin import widgets as W
+from .skin.dialogs import HwDialog
 from .waveform import StemView
 
 DEFAULT_LABEL = {"vocal": "Vocal Chop", "guitar": "Guitar Stab", "fx": "FX", "synth": "Synth Stab",
@@ -19,12 +21,10 @@ DEFAULT_LABEL = {"vocal": "Vocal Chop", "guitar": "Guitar Stab", "fx": "FX", "sy
                  "cymbals": "Crash", "toms": "Tom"}
 
 
-class ManualDialog(QDialog):
+class ManualDialog(HwDialog):
     def __init__(self, win, stem):
-        super().__init__(win)
+        super().__init__(win, "Edit regions", (1120, 760))
         self.win, self.stem = win, stem
-        self.setWindowTitle(f"Edit regions · {stem.name}")
-        self.resize(1180, 760)
         self.regions = []
         for c in win.chops:
             if c.stem_id == stem.id:
@@ -32,41 +32,47 @@ class ManualDialog(QDialog):
                                          bars=c.bars, origin=c.origin, flag=c.flag,
                                          approved=c.approved, src=c,
                                          style="ai" if c.origin in ("ai", "auto") else "user"))
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 14, 16, 14)
+        lay = self.body
         lay.setSpacing(12)
 
         head = QHBoxLayout()
-        head.addWidget(label(stem.name, "h2"))
-        head.addWidget(label("Manual mode" if stem.mode == "manual" else f"AI detected: {stem.kind}",
-                             "muted"))
+        head.setSpacing(10)
+        info = QVBoxLayout()
+        info.setSpacing(3)
+        info.addWidget(W.mono(stem.name, "on_dark", 15, 600, 0.4))
+        info.addWidget(W.cap("Manual mode" if stem.mode == "manual" else f"AI detected: {stem.kind}",
+                             "on_dark_muted", 11, 500, 1.4))
+        head.addLayout(info)
         head.addStretch(1)
-        self.play_btn = QPushButton("Play selected")
+        self.play_btn = W.HwButton("Play", "key", icon="play", min_h=40)
+        self.play_btn.setToolTip("Play the selected region")
         self.play_btn.clicked.connect(self.play_selected)
         head.addWidget(self.play_btn)
-        stop = QPushButton("Stop")
+        stop = W.HwButton("", "key", icon="stop", min_h=40)
+        stop.setFixedWidth(50)
         stop.clicked.connect(win.player.stop)
         head.addWidget(stop)
-        zo = QPushButton("−")
+        head.addSpacing(8)
+        zo = W.HwButton("", "icon", icon="minus", min_h=40)
         zo.setToolTip("Zoom out")
-        zo.setFixedWidth(36)
-        zi = QPushButton("+")
+        zi = W.HwButton("", "icon", icon="plus", min_h=40)
         zi.setToolTip("Zoom in")
-        zi.setFixedWidth(36)
-        fit = QPushButton("Whole file")
+        fit = W.HwButton("Whole file", "dark", icon="expand", min_h=40, px=11.5)
         head.addWidget(zo)
         head.addWidget(zi)
         head.addWidget(fit)
-        self.snap = QCheckBox("Snap to start of sound")
+        head.addSpacing(8)
+        self.snap = W.LedToggle("Snap", "green", icon="magnet", min_h=40)
+        self.snap.setToolTip("Snap new regions to the start of the sound")
         self.snap.setChecked(True)
         head.addWidget(self.snap)
         lay.addLayout(head)
 
-        vp, vl = panel(spacing=6, margins=(10, 10, 10, 8))
-        vl.addWidget(label("Click and drag across the waveform to mark a region. Drag a region's "
-                           "edge to resize it. Dashed boxes came from the AI. Scroll to zoom, "
-                           "Shift+scroll to move.", "muted", wrap=True))
+        vg = W.GroupFrame("", margins=(12, 16, 12, 10))
+        hint = W.cap("Drag across the waveform to mark a region  ·  drag an edge to resize  ·  "
+                     "dashed = AI  ·  scroll to zoom", "on_dark_muted", 11, 500, 1.0)
+        hint.setWordWrap(True)
+        vg.lay.addWidget(hint)
         self.view = StemView(editable=True)
         self.view.setMinimumHeight(220)
         self.view.set_stem(win.peaks(stem), stem.frames, stem.sr)
@@ -75,36 +81,45 @@ class ManualDialog(QDialog):
         self.view.regionAdded.connect(self.add_region)
         self.view.regionChanged.connect(self.region_changed)
         self.view.regionSelected.connect(self.select_row)
-        vl.addWidget(self.view)
-        lay.addWidget(vp)
+        vg.lay.addWidget(self.view)
+        lay.addWidget(vg, 3)
         zo.clicked.connect(lambda: self.view.zoom(1.5))
         zi.clicked.connect(lambda: self.view.zoom(0.66))
         fit.clicked.connect(lambda: self.view.set_stem(win.peaks(stem), stem.frames, stem.sr))
 
+        tg = W.GroupFrame("Regions", margins=(10, 22, 10, 8))
         self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["#", "Start", "End", "Label", "From", "", ""])
+        self.table.setHorizontalHeaderLabels(["#", "START", "END", "LABEL", "FROM", "", ""])
         hh = self.table.horizontalHeader()
-        for c, w in ((0, 50), (1, 110), (2, 110), (3, 200), (4, 80), (5, 70), (6, 90)):
+        for c, w in ((0, 50), (1, 130), (2, 130), (3, 230), (4, 90), (5, 110), (6, 130)):
             hh.setSectionResizeMode(c, QHeaderView.Fixed)
             self.table.setColumnWidth(c, w)
         hh.setStretchLastSection(True)
         hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        hh.setFont(K.font(11, 600, 1.4))
+        hh.setFixedHeight(34)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.verticalHeader().setDefaultSectionSize(42)
+        self.table.verticalHeader().setDefaultSectionSize(44)
+        self.table.setFont(K.font(13, 400, 0.3))
         self.table.itemSelectionChanged.connect(self._table_selected)
-        lay.addWidget(self.table, 1)
+        tg.lay.addWidget(self.table)
+        lay.addWidget(tg, 3)
 
         bottom = QHBoxLayout()
-        bottom.addWidget(label("Each region is trimmed of silence, de-clicked and normalized "
-                               "automatically.", "muted"), 1)
-        cancel = QPushButton("Cancel")
+        note = W.cap("Each region is trimmed of silence, de-clicked and normalized "
+                     "automatically.", "on_dark_muted", 11, 500, 1.0)
+        note.setWordWrap(True)
+        bottom.addWidget(note, 1)
+        cancel = W.HwButton("Cancel", "dark", min_h=44)
+        cancel.setMinimumWidth(170)
         cancel.clicked.connect(self.reject)
         bottom.addWidget(cancel)
-        self.apply_btn = QPushButton("")
-        self.apply_btn.setObjectName("primary")
+        bottom.addSpacing(10)
+        self.apply_btn = W.HwButton("", "red", min_h=44)
+        self.apply_btn.setMinimumWidth(300)
         self.apply_btn.clicked.connect(self.apply)
         bottom.addWidget(self.apply_btn)
         lay.addLayout(bottom)
@@ -129,28 +144,27 @@ class ManualDialog(QDialog):
             cb = label_combo(r["label"])
             cb.currentTextChanged.connect(lambda txt, r=r: self._relabel(r, txt))
             self.table.setCellWidget(i, 3, self._pad(cb))
-            self.table.setItem(i, 4, QTableWidgetItem("AI" if r["style"] == "ai" else "You"))
-            pb = QPushButton("Play")
-            pb.setObjectName("link")
+            self.table.setItem(i, 4, QTableWidgetItem("AI" if r["style"] == "ai" else "YOU"))
+            pb = W.HwButton("Play", "dark", icon="play", min_h=30, px=10.5, icon_size=12)
             pb.clicked.connect(lambda _c=False, i=i: self.play(i))
-            self.table.setCellWidget(i, 5, pb)
-            rm = QPushButton("Remove")
-            rm.setObjectName("link")
+            self.table.setCellWidget(i, 5, self._pad(pb))
+            rm = W.HwButton("Remove", "dark", icon="x", min_h=30, px=10.5, icon_size=12)
             rm.clicked.connect(lambda _c=False, i=i: self.remove(i))
-            self.table.setCellWidget(i, 6, rm)
+            self.table.setCellWidget(i, 6, self._pad(rm))
         self.table.blockSignals(False)
         if 0 <= select < len(self.regions):
             self.table.selectRow(select)
         n = len(self.regions)
-        self.apply_btn.setText(f"Send {n} region{'s' if n != 1 else ''} to Review")
+        self.apply_btn.setText(f"Send {n} region{'s' if n != 1 else ''} to review")
         self.apply_btn.setEnabled(True)
 
     @staticmethod
     def _pad(w):
         holder = QWidget()
         lay = QHBoxLayout(holder)
-        lay.setContentsMargins(4, 4, 8, 4)
+        lay.setContentsMargins(4, 5, 8, 5)
         lay.addWidget(w)
+        lay.addStretch(1)
         return holder
 
     def _relabel(self, r, txt):

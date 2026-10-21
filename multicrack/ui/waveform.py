@@ -1,14 +1,17 @@
-"""Waveform views in a dark sampler style: mirrored, filled, with grid and centre line."""
+"""Waveform displays: dark oscilloscope-style glass, filled mirrored waveforms (Edison style)."""
 from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
+from PySide6.QtGui import (QColor, QLinearGradient, QPainter, QPainterPath, QPen, QPolygonF)
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
-from .theme import WAVE
+from .skin import core as K
+from .skin.core import C
 
 BLOCK = 256
+WAVE = {"groove": ["#B8473A", "#3F73B5", "#8A5CC2", "#C9902E"], "roll": "#E8C547"}
+MARK = QColor("#E8483A")
 
 
 class PeakCache:
@@ -52,50 +55,101 @@ class PeakCache:
         return val
 
 
-def paint_wave(p: QPainter, rect: QRectF, mins, maxs, gain=1.0, grid=True):
-    p.fillRect(rect, QColor(WAVE["bg"]))
-    w, h = rect.width(), rect.height()
-    cy = rect.top() + h / 2
-    if grid and w > 120:
-        p.setPen(QPen(QColor(WAVE["grid"]), 1))
-        for k in range(1, 10):
-            x = rect.left() + w * k / 10
-            p.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
-        for frac in (0.25, 0.75):
-            y = rect.top() + h * frac
-            p.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
-    p.setPen(QPen(QColor(WAVE["center"]), 1))
-    p.drawLine(QPointF(rect.left(), cy), QPointF(rect.right(), cy))
-    n = len(mins)
-    if n == 0:
-        return
-    half = h / 2 * 0.94
-    xs = rect.left() + (np.arange(n) + 0.5) * (w / n)
-    top = cy - np.clip(maxs * gain, -1, 1) * half
-    bot = cy - np.clip(mins * gain, -1, 1) * half
-    top = np.minimum(top, cy - 0.5)
-    bot = np.maximum(bot, cy + 0.5)
-    pts = [QPointF(float(x), float(y)) for x, y in zip(xs, top)]
-    pts += [QPointF(float(x), float(y)) for x, y in zip(xs[::-1], bot[::-1])]
-    poly = QPolygonF(pts)
-    p.setPen(QPen(QColor(WAVE["edge"]), 0.8))
-    p.setBrush(QColor(WAVE["fill"]))
-    p.drawPolygon(poly)
-    p.setBrush(Qt.NoBrush)
-
-
 def _gain(mins, maxs):
     pk = max(float(np.max(np.abs(maxs))) if len(maxs) else 0.0,
              float(np.max(np.abs(mins))) if len(mins) else 0.0)
     return 1.0 / pk if pk > 1e-6 else 1.0
 
 
+def paint_glass(p: QPainter, r: QRectF, radius=4.0):
+    """Recessed dark display glass."""
+    path = K.rrect(r, radius)
+    g = QLinearGradient(r.topLeft(), r.bottomLeft())
+    g.setColorAt(0, QColor("#0E1012"))
+    g.setColorAt(1, QColor("#15181B"))
+    p.fillPath(path, g)
+    K.inner_shadow(p, r, radius, 190, 10)
+    p.save()
+    p.setPen(QPen(QColor("#000000"), 1.2))
+    p.setBrush(Qt.NoBrush)
+    p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+    p.setPen(QPen(QColor(255, 255, 255, 22), 1))
+    p.drawLine(QPointF(r.left() + radius, r.bottom() + 0.5), QPointF(r.right() - radius, r.bottom() + 0.5))
+    p.restore()
+
+
+def wave_poly(rect: QRectF, mins, maxs, gain=1.0):
+    n = len(mins)
+    if n == 0:
+        return None
+    w, h = rect.width(), rect.height()
+    cy = rect.top() + h / 2
+    half = h / 2 * 0.92
+    xs = rect.left() + (np.arange(n) + 0.5) * (w / n)
+    top = cy - np.clip(maxs * gain, -1, 1) * half
+    bot = cy - np.clip(mins * gain, -1, 1) * half
+    top = np.minimum(top, cy - 0.6)
+    bot = np.maximum(bot, cy + 0.6)
+    pts = [QPointF(float(x), float(y)) for x, y in zip(xs, top)]
+    pts += [QPointF(float(x), float(y)) for x, y in zip(xs[::-1], bot[::-1])]
+    return QPolygonF(pts)
+
+
+def paint_wave(p: QPainter, rect: QRectF, mins, maxs, gain=1.0, fill=None, edge=None, center=True):
+    cy = rect.top() + rect.height() / 2
+    if center:
+        p.setPen(QPen(QColor("#2C3237"), 1))
+        p.drawLine(QPointF(rect.left(), cy), QPointF(rect.right(), cy))
+    poly = wave_poly(rect, mins, maxs, gain)
+    if poly is None:
+        return
+    p.setPen(QPen(QColor(edge or K.pal()["wave_edge"]), 0.7))
+    p.setBrush(QColor(fill or K.pal()["wave"]))
+    p.drawPolygon(poly)
+    p.setBrush(Qt.NoBrush)
+
+
+def _time_steps(span_s):
+    steps = [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60]
+    return next((s for s in steps if span_s / s <= 9), 60)
+
+
+def _fmt_t(t, step):
+    m = int(t // 60)
+    sec = t - 60 * m
+    return f"{m}:{sec:05.2f}" if step < 1 else f"{m}:{int(round(sec)):02d}"
+
+
+def _grid_and_ruler(p, area: QRectF, ruler: QRectF, a, b, sr, x_of):
+    span_s = (b - a) / sr
+    if span_s <= 0:
+        return
+    step = _time_steps(span_s)
+    t = (int(a / sr / step) + 1) * step if a > 0 else 0.0
+    f = K.font(11, 500, 0.6)
+    p.setFont(f)
+    while t * sr <= b:
+        x = x_of(t * sr)
+        p.setPen(QPen(QColor(255, 255, 255, 14), 1))
+        p.drawLine(QPointF(x, area.top()), QPointF(x, area.bottom()))
+        p.setPen(QPen(QColor(255, 255, 255, 60), 1))
+        p.drawLine(QPointF(x, ruler.top()), QPointF(x, ruler.top() + 4))
+        p.setPen(QColor("#A9A49C"))
+        p.drawText(QRectF(x + 4, ruler.top(), 80, ruler.height()), int(Qt.AlignLeft | Qt.AlignVCenter),
+                   _fmt_t(t, step))
+        t += step
+    for frac in (0.25, 0.75):
+        y = area.top() + area.height() * frac
+        p.setPen(QPen(QColor(255, 255, 255, 9), 1))
+        p.drawLine(QPointF(area.left(), y), QPointF(area.right(), y))
+
+
 class MiniWave(QWidget):
-    """Small static waveform of one chop (normalized for visibility)."""
+    """Small waveform of one chop for the list (no box, just the trace)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(36)
+        self.setMinimumHeight(34)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.cache = None
         self.a = self.b = 0
@@ -112,33 +166,36 @@ class MiniWave(QWidget):
             self.update()
 
     def paintEvent(self, _e):
+        if self.cache is None:
+            return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        r = QRectF(self.rect())
-        if self.cache is None:
-            p.fillRect(r, QColor(WAVE["bg"]))
-            return
-        mins, maxs = self.cache.columns(self.a, self.b, max(8, int(r.width() / 2)))
+        r = QRectF(self.rect()).adjusted(0, 2, 0, -2)
+        mins, maxs = self.cache.columns(self.a, self.b, max(8, int(r.width() / 1.6)))
         if self.reverse:
             mins, maxs = mins[::-1], maxs[::-1]
-        paint_wave(p, r, mins, maxs, _gain(mins, maxs), grid=False)
+        paint_wave(p, r, mins, maxs, _gain(mins, maxs), center=False)
         if self.playhead is not None:
             x = r.width() * self.playhead
-            p.setPen(QPen(QColor("#FFFFFF"), 1.5))
-            p.drawLine(QPointF(x, 0), QPointF(x, r.height()))
+            p.setPen(QPen(QColor("#FFFFFF"), 1.6))
+            p.drawLine(QPointF(x, 0), QPointF(x, self.height()))
 
 
 class TrimEditor(QWidget):
-    """Large waveform of one chop with draggable start / end handles.
+    """Large waveform of one chop with draggable start / end markers.
 
     Zoom with the wheel (or the page's buttons) all the way out to the whole stem.
-    Drag a handle to trim, or drag across empty waveform to select a new section."""
+    Drag a marker to trim, or drag across the waveform to select a new section."""
     changed = Signal(int, int)
     viewChanged = Signal(int, int)
+    selectionChanged = Signal(int, int)
+
+    TOP = 16       # marker triangles
+    RULER = 24     # time labels
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(170)
+        self.setMinimumHeight(176)
         self.setMouseTracking(True)
         self.cache = None
         self.n = 0
@@ -205,86 +262,87 @@ class TrimEditor(QWidget):
         self.cache = None
         self.update()
 
+    def _area(self):
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        return r, QRectF(r.left() + 2, r.top() + self.TOP, r.width() - 4,
+                         r.height() - self.TOP - self.RULER)
+
     def _x(self, s):
-        w = self.width()
-        return (s - self.view_a) / max(1, self.view_b - self.view_a) * w
+        _r, a = self._area()
+        return a.left() + (s - self.view_a) / max(1, self.view_b - self.view_a) * a.width()
 
     def _s(self, x):
-        return int(self.view_a + x / max(1, self.width()) * (self.view_b - self.view_a))
+        _r, a = self._area()
+        return int(self.view_a + (x - a.left()) / max(1, a.width()) * (self.view_b - self.view_a))
 
     # ----------------------------------------------------------- paint
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        r = QRectF(self.rect())
+        r, area = self._area()
+        paint_glass(p, r, 4)
         if self.cache is None:
-            p.fillRect(r, QColor(WAVE["bg"]))
-            p.setPen(QColor("#8A949C"))
-            p.drawText(r, Qt.AlignCenter, "Press play on a chop to load it here")
+            K.text(p, r, "PRESS PLAY ON A CHOP TO LOAD IT HERE", K.font(12, 500, 2.0),
+                   QColor("#6E6A64"), Qt.AlignCenter)
             return
-        mins, maxs = self.cache.columns(self.view_a, self.view_b, max(8, int(r.width() / 1.5)))
+        ruler = QRectF(r.left() + 4, area.bottom() + 2, r.width() - 8, self.RULER - 4)
+        p.save()
+        p.setClipRect(r.adjusted(2, 2, -2, -2))
+        _grid_and_ruler(p, area, ruler, self.view_a, self.view_b, self.sr, self._x)
+        cols = max(8, int(area.width() / 1.4))
+        mins, maxs = self.cache.columns(self.view_a, self.view_b, cols)
         span = self.view_b - self.view_a
         if span > 4 * max(1, self.end - self.start):
-            gain = min(_gain(mins, maxs), 8.0)        # zoomed out: scale to what's on screen
+            gain = min(_gain(mins, maxs), 8.0)
         else:
             cm, cx = self.cache.columns(self.start, self.end, 64)
             gain = _gain(cm, cx)
-        paint_wave(p, r, mins, maxs, gain)
-        f = QFont(self.font())
-        f.setPointSizeF(8.5)
-        p.setFont(f)
-        self._ruler(p, r)
+        # whole view in grey, selection in green
+        paint_wave(p, area, mins, maxs, gain, fill=K.pal()["wave_dim"], edge="#8A8F94")
         xs, xe = self._x(self.start), self._x(self.end)
-        shade = QColor(WAVE["shade"])
-        shade.setAlpha(165)
-        p.fillRect(QRectF(0, 0, max(0, min(xs, r.width())), r.height()), shade)
-        if xe < r.width():
-            p.fillRect(QRectF(max(0, xe), 0, r.width() - max(0, xe), r.height()), shade)
-        hc = QColor(WAVE["handle"])
-        if xe - xs < 3:     # tiny at this zoom: draw a visible marker
-            p.fillRect(QRectF(xs - 1, 0, 3, r.height()), hc)
-        p.setPen(QPen(hc, 2))
-        p.drawLine(QPointF(xs, 0), QPointF(xs, r.height()))
-        p.drawLine(QPointF(xe, 0), QPointF(xe, r.height()))
-        p.setPen(Qt.NoPen)
-        p.setBrush(hc)
-        p.drawRoundedRect(QRectF(xs, 0, 12, 16), 2, 2)
-        p.drawRoundedRect(QRectF(xe - 12, r.height() - 16, 12, 16), 2, 2)
+        p.save()
+        p.setClipRect(QRectF(xs, area.top() - 2, max(0, xe - xs), area.height() + 4))
+        paint_wave(p, area, mins, maxs, gain, center=False)
+        glow = QColor(K.pal()["wave"])
+        glow.setAlpha(18)
+        p.fillRect(QRectF(xs, area.top(), xe - xs, area.height()), glow)
+        p.restore()
         # fades (as heard: a reversed chop fades in from its original end)
         fi, fo = (self.fade_out, self.fade_in) if self.reverse else (self.fade_in, self.fade_out)
-        ramp = QPen(QColor(255, 255, 255, 170), 1.4)
-        ramp.setStyle(Qt.DashLine)
-        p.setPen(ramp)
+        dash = QPen(QColor(235, 232, 225, 190), 1.3, Qt.DashLine)
+        dash.setDashPattern([4, 3])
+        p.setPen(dash)
         if fi > 0:
-            p.drawLine(QPointF(xs, r.height() - 2), QPointF(self._x(self.start + fi), 18))
+            p.drawLine(QPointF(xs, area.bottom()), QPointF(self._x(self.start + fi), area.top()))
         if fo > 0:
-            p.drawLine(QPointF(self._x(self.end - fo), 18), QPointF(xe, r.height() - 2))
+            p.drawLine(QPointF(self._x(self.end - fo), area.top()), QPointF(xe, area.bottom()))
+        # markers
+        for x in (xs, xe):
+            p.setPen(QPen(MARK, 1.8))
+            p.drawLine(QPointF(x, r.top() + self.TOP - 2), QPointF(x, area.bottom()))
+            tri = QPainterPath()
+            tri.moveTo(x - 6.5, r.top() + 3)
+            tri.lineTo(x + 6.5, r.top() + 3)
+            tri.lineTo(x, r.top() + self.TOP - 1)
+            tri.closeSubpath()
+            p.setPen(Qt.NoPen)
+            p.setBrush(MARK)
+            p.drawPath(tri)
         if self.playhead is not None:
             xp = self._x(self.playhead)
-            p.setPen(QPen(QColor("#FFFFFF"), 1.6))
-            p.drawLine(QPointF(xp, 0), QPointF(xp, r.height()))
-        p.setPen(QColor("#DDE3E8"))
-        dur = (self.end - self.start) / self.sr
-        p.drawText(QRectF(8, r.height() - 20, 400, 18), Qt.AlignLeft | Qt.AlignVCenter,
-                   f"{dur:.3f} s selected" + ("  ·  plays reversed" if self.reverse else ""))
+            p.setPen(QPen(QColor("#FFFFFF"), 1.7))
+            p.drawLine(QPointF(xp, r.top() + self.TOP - 2), QPointF(xp, area.bottom()))
+            tri = QPainterPath()
+            tri.moveTo(xp - 5.5, r.top() + 4)
+            tri.lineTo(xp + 5.5, r.top() + 4)
+            tri.lineTo(xp, r.top() + self.TOP - 2)
+            tri.closeSubpath()
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#FFFFFF"))
+            p.drawPath(tri)
+        p.restore()
 
-    def _ruler(self, p, r):
-        span_s = (self.view_b - self.view_a) / self.sr
-        steps = [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60]
-        step = next((s for s in steps if span_s / s <= 10), 60)
-        t0 = (int(self.view_a / self.sr / step) + 1) * step
-        p.setPen(QColor("#8A949C"))
-        t = t0
-        while t * self.sr < self.view_b:
-            x = self._x(t * self.sr)
-            p.drawLine(QPointF(x, 0), QPointF(x, 5))
-            m = int(t // 60)
-            sec = t - 60 * m
-            txt = f"{m}:{sec:05.2f}" if step < 1 else f"{m}:{int(round(sec)):02d}"
-            p.drawText(QRectF(x + 3, 2, 70, 14), Qt.AlignLeft | Qt.AlignVCenter, txt)
-            t += step
-
-    # ---------------------------------------------------------- input
+    # ----------------------------------------------------------- input
     def wheelEvent(self, e):
         if self.cache is None:
             return
@@ -328,6 +386,7 @@ class TrimEditor(QWidget):
             else:
                 self.end = max(s, self.start + int(0.005 * self.sr))
             self.update()
+            self.selectionChanged.emit(self.start, self.end)
         elif self.cache is not None:
             self.setCursor(Qt.SizeHorCursor if self._near(x) else Qt.IBeamCursor)
 
@@ -346,9 +405,9 @@ class TrimEditor(QWidget):
 
 
 class StemView(QWidget):
-    """Whole-stem waveform with zoom, scroll and regions.
+    """Whole-stem display with zoom, scroll, colored section strips and regions.
 
-    regions: list of dicts {start, end, style: 'user'|'ai'|'loop'|'roll', tag}
+    regions: list of dicts {start, end, style: 'user'|'ai'|'loop'|'roll', tag, color?}
     In editable mode you drag on empty space to add a region and drag region edges to resize.
     """
     regionAdded = Signal(int, int)
@@ -366,11 +425,13 @@ class StemView(QWidget):
         self.view_a, self.view_b = 0, 1
         self.regions: list[dict] = []
         self.bands: list[dict] = []      # coloured section strips (start, end, color, name)
+        self.ticks: list = []            # small markers along the bottom (sample positions)
+        self.bar_labels: list = []       # (sample, text) under the display
         self.selected = -1
         self._drag = None
         self.snap = None        # for newly drawn regions
         self.snap_edge = None   # for dragged region edges (gentle)
-        self.strip = 22
+        self.strip = 26
 
     def set_stem(self, cache: PeakCache, n: int, sr: int):
         self.cache, self.n, self.sr = cache, max(1, n), sr
@@ -397,11 +458,20 @@ class StemView(QWidget):
         self.view_a, self.view_b = max(0, a - pad), min(self.n, b + pad)
         self.update()
 
+    def _rects(self):
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        top = self.strip if self.bands else 6
+        bottom = 22 if self.bar_labels else 22
+        area = QRectF(r.left() + 3, r.top() + top, r.width() - 6, r.height() - top - bottom)
+        return r, area
+
     def _x(self, s):
-        return (s - self.view_a) / max(1, self.view_b - self.view_a) * self.width()
+        _r, a = self._rects()
+        return a.left() + (s - self.view_a) / max(1, self.view_b - self.view_a) * a.width()
 
     def _s(self, x):
-        return int(self.view_a + x / max(1, self.width()) * (self.view_b - self.view_a))
+        _r, a = self._rects()
+        return int(self.view_a + (x - a.left()) / max(1, a.width()) * (self.view_b - self.view_a))
 
     def wheelEvent(self, e):
         d = e.angleDelta().y()
@@ -418,64 +488,91 @@ class StemView(QWidget):
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        full = QRectF(self.rect())
-        top = self.strip if self.bands else 0
-        r = QRectF(0, top, full.width(), full.height() - top)
+        r, area = self._rects()
+        paint_glass(p, r, 4)
         if self.cache is None:
-            p.fillRect(full, QColor(WAVE["bg"]))
             return
+        p.save()
+        p.setClipRect(r.adjusted(2, 2, -2, -2))
+        ruler = QRectF(r.left() + 4, area.bottom() + 1, r.width() - 8, 20)
+        if not self.bar_labels:
+            _grid_and_ruler(p, area, ruler, self.view_a, self.view_b, self.sr, self._x)
+        # section strips
         if self.bands:
-            p.fillRect(QRectF(0, 0, full.width(), top), QColor(WAVE["bg"]).lighter(115))
-            f = QFont(self.font())
-            f.setPointSizeF(8.5)
-            p.setFont(f)
+            f = K.font(12, 500, 0.8)
             for b in self.bands:
                 x0, x1 = self._x(b["start"]), self._x(b["end"])
-                if x1 < 0 or x0 > full.width():
+                if x1 < r.left() or x0 > r.right():
                     continue
                 c = QColor(b["color"])
-                c.setAlpha(200)
-                p.fillRect(QRectF(x0, 2, max(2, x1 - x0), top - 4), c)
-                if x1 - x0 > 40:
-                    p.setPen(QColor("#0B1A24"))
-                    p.drawText(QRectF(x0 + 4, 2, x1 - x0 - 6, top - 4),
-                               Qt.AlignVCenter | Qt.AlignLeft, b["name"])
-        mins, maxs = self.cache.columns(self.view_a, self.view_b, max(8, int(r.width() / 1.5)))
+                c.setAlpha(225)
+                br = QRectF(x0, r.top() + 4, max(2, x1 - x0), self.strip - 8)
+                p.fillRect(br, c)
+                p.setPen(QPen(QColor(255, 255, 255, 40), 1))
+                p.drawLine(br.topLeft(), br.topRight())
+                if x1 - x0 > 60:
+                    K.text(p, br, b["name"], f, QColor("#F4EFE8"), Qt.AlignCenter)
+        cols = max(8, int(area.width() / 1.4))
+        mins, maxs = self.cache.columns(self.view_a, self.view_b, cols)
         gm, gx = self.cache.columns(0, self.n, 256)
-        paint_wave(p, r, mins, maxs, min(_gain(gm, gx), 4.0))
-        f = QFont(self.font())
-        f.setPointSizeF(8.5)
-        f.setBold(True)
-        p.setFont(f)
+        gain = min(_gain(gm, gx), 4.0)
+        paint_wave(p, area, mins, maxs, gain, fill=K.pal()["wave_neutral"], edge="#E3E6E8")
+        # regions
+        tagf = K.font(11, 700, 0.5)
         for i, reg in enumerate(self.regions):
             x0, x1 = self._x(reg["start"]), self._x(reg["end"])
-            if x1 < 0 or x0 > r.width():
+            if x1 < area.left() or x0 > area.right():
                 continue
             style = reg.get("style", "user")
-            col = QColor(WAVE["ai"] if style == "ai" else WAVE["roll"] if style == "roll"
-                         else WAVE["region"])
+            col = QColor(reg.get("color") or (K.pal()["wave_neutral"] if style == "ai" else
+                                              WAVE["roll"] if style == "roll" else "#4CC2FF"))
+            if style in ("user", "loop", "roll") and not reg.get("color"):
+                col = QColor("#E8483A") if style == "user" else col
             fill = QColor(col)
-            fill.setAlpha(70 if i == self.selected else 40)
-            p.fillRect(QRectF(x0, r.top(), x1 - x0, r.height()), fill)
-            pen = QPen(col, 2.5 if i == self.selected else 1.6)
+            fill.setAlpha(70 if i == self.selected else 42)
+            box = QRectF(x0, area.top(), x1 - x0, area.height())
+            p.fillRect(box, fill)
+            # tint the waveform inside the region
+            p.save()
+            p.setClipRect(box)
+            paint_wave(p, area, mins, maxs, gain, fill=col.lighter(115).name(), edge=col.lighter(150).name(),
+                       center=False)
+            p.restore()
+            pen = QPen(col, 2.4 if i == self.selected else 1.6)
             if style == "ai":
                 pen.setStyle(Qt.DashLine)
             p.setPen(pen)
-            p.drawRect(QRectF(x0, r.top() + 1, x1 - x0, r.height() - 2))
+            p.setBrush(Qt.NoBrush)
+            p.drawRect(box.adjusted(0, 0.8, 0, -0.8))
             tag = str(reg.get("tag", ""))
-            if tag and x1 - x0 > 14:
-                tw = 8 + 7 * len(tag)
-                p.fillRect(QRectF(x0 + 3, r.top() + 4, tw, 16), col)
-                p.setPen(QColor("#0B1A24"))
-                p.drawText(QRectF(x0 + 3, r.top() + 4, tw, 16), Qt.AlignCenter, tag)
+            if tag and x1 - x0 > 16:
+                tw = 10 + 7.5 * len(tag)
+                tr = QRectF(x0 + 3, area.top() + 4, tw, 17)
+                p.fillRect(tr, col)
+                K.text(p, tr, tag, tagf, QColor("#0B0B0C"), Qt.AlignCenter)
+        for s in self.ticks:
+            x = self._x(s)
+            if area.left() <= x <= area.right():
+                p.setPen(QPen(QColor(WAVE["roll"]), 2.2))
+                p.drawLine(QPointF(x, area.bottom() - 9), QPointF(x, area.bottom() - 1))
+        if self.bar_labels:
+            f = K.font(11.5, 500, 0.6)
+            for s, label in self.bar_labels:
+                x = self._x(s)
+                if r.left() - 2 <= x <= r.right() + 2:
+                    p.setPen(QPen(QColor(255, 255, 255, 50), 1))
+                    p.drawLine(QPointF(x, area.bottom()), QPointF(x, area.bottom() + 4))
+                    K.text(p, QRectF(x - 30, area.bottom() + 3, 60, 18), label, f, QColor("#C9C4BA"),
+                           Qt.AlignCenter)
         if self._drag and self._drag[0] == "new":
             x0, x1 = sorted((self._x(self._drag[1]), self._x(self._drag[2])))
-            col = QColor(WAVE["region"])
+            col = QColor("#E8483A")
             fill = QColor(col)
             fill.setAlpha(50)
-            p.fillRect(QRectF(x0, r.top(), x1 - x0, r.height()), fill)
+            p.fillRect(QRectF(x0, area.top(), x1 - x0, area.height()), fill)
             p.setPen(QPen(col, 1.6))
-            p.drawRect(QRectF(x0, r.top() + 1, x1 - x0, r.height() - 2))
+            p.drawRect(QRectF(x0, area.top() + 1, x1 - x0, area.height() - 2))
+        p.restore()
 
     # ---- editing
     def _hit(self, x):

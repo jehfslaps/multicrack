@@ -103,8 +103,12 @@ def run(gui=True) -> int:
             assert len(w.chops) == n0 - 1
             w.review_page.clone_chop(w.chops[0])
             w.review_page.approve_and_next()
+            w.theme_btn.setChecked(True)
             w.toggle_theme()
+            w.theme_btn.setChecked(False)
             w.toggle_theme()
+            from ..ui.skin import core as SK
+            assert SK.FAMILY == "IBM Plex Mono", f"bundled font missing ({SK.FAMILY})"
             w.autosave_path = os.path.join(out, "autosave.multicrack")
             w.autosave()
             assert os.path.exists(w.autosave_path)

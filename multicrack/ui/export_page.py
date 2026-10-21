@@ -1,4 +1,4 @@
-"""Step 3: what was exported, and where."""
+"""Step 3: what was exported, and where (hardware skin)."""
 from __future__ import annotations
 
 import os
@@ -6,11 +6,11 @@ import subprocess
 import sys
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QListWidget, QPushButton, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLineEdit,
+                               QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from . import icons
-from .common import label, panel
+from .skin import core as K
+from .skin import widgets as W
 
 
 def open_folder(path):
@@ -26,52 +26,70 @@ class ExportPage(QWidget):
     def __init__(self, win):
         super().__init__()
         self.win = win
-        self.setObjectName("page")
         self.folder = ""
         outer = QHBoxLayout(self)
-        outer.setContentsMargins(16, 24, 16, 16)
+        outer.setContentsMargins(0, 4, 0, 0)
         outer.addStretch(1)
-        box, bl = panel(spacing=14, margins=(24, 22, 24, 22))
-        box.setMinimumWidth(640)
-        box.setMaximumWidth(760)
-        head = QHBoxLayout()
-        self.icon = QLabel()
-        head.addWidget(self.icon)
         col = QVBoxLayout()
-        col.setSpacing(2)
-        self.title = label("Nothing exported yet", "h1")
-        col.addWidget(self.title)
-        self.path = label("", "mono", wrap=True)
-        self.path.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        col.addWidget(self.path)
-        head.addLayout(col, 1)
+        col.setSpacing(0)
+        box = W.Module("EXPORT", margins=(22, 10, 22, 18))
+        box.setMinimumWidth(820)
+        box.setMaximumWidth(980)
+        bl = box.lay
+        bl.setSpacing(14)
+
+        head = QHBoxLayout()
+        head.setSpacing(14)
+        self.icon = W.Lamp("led_green", 30)
+        head.addWidget(self.icon)
+        hc = QVBoxLayout()
+        hc.setSpacing(6)
+        self.title = W.mono("NOTHING EXPORTED YET", "on_dark", 22, 600, 2.4)
+        hc.addWidget(self.title)
+        self.path = QLineEdit()
+        self.path.setReadOnly(True)
+        self.path.setFont(K.font(13, 400, 0.3))
+        hc.addWidget(self.path)
+        head.addLayout(hc, 1)
         bl.addLayout(head)
-        self.list = QListWidget()
-        self.list.setMinimumHeight(320)
-        f = self.list.font()
-        f.setFamily("Consolas")
-        self.list.setFont(f)
-        bl.addWidget(self.list, 1)
-        bl.addWidget(label("24-bit WAV · original sample rate · each sample normalized to −0.1 dB · "
-                           "light de-click applied · no tags embedded", "muted", wrap=True))
+
+        outline = W.Outline(margins=(4, 2, 4, 4))
+        self.list = QTableWidget(0, 2)
+        self.list.setHorizontalHeaderLabels(["FILE NAME", "SIZE"])
+        hh = self.list.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.Stretch)
+        hh.setSectionResizeMode(1, QHeaderView.Fixed)
+        self.list.setColumnWidth(1, 120)
+        hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        hh.setFont(K.font(11, 600, 1.4))
+        hh.setFixedHeight(36)
+        self.list.verticalHeader().setVisible(False)
+        self.list.verticalHeader().setDefaultSectionSize(36)
+        self.list.setShowGrid(False)
+        self.list.setSelectionMode(QAbstractItemView.NoSelection)
+        self.list.setFocusPolicy(Qt.NoFocus)
+        self.list.setFont(K.font(13, 400, 0.3))
+        self.list.setMinimumHeight(330)
+        outline.lay.addWidget(self.list)
+        bl.addWidget(outline, 1)
+        bl.addWidget(W.cap("24-bit WAV  ·  original sample rate  ·  normalized −0.1 dB  ·  "
+                           "de-clicked  ·  no tags embedded", "on_dark_muted", 11, 500, 1.3))
         row = QHBoxLayout()
+        row.setSpacing(12)
         row.addStretch(1)
-        self.again = QPushButton("Chop another song")
+        self.again = W.HwButton("Chop another song", "dark", min_h=44)
         self.again.clicked.connect(self.win.start_over)
         row.addWidget(self.again)
-        self.open = QPushButton("Open folder")
+        self.open = W.HwButton("Open folder", "key", icon="folder", min_h=44)
         self.open.clicked.connect(lambda: self.folder and open_folder(self.folder))
         row.addWidget(self.open)
-        self.next_btn = QPushButton("")
-        self.next_btn.setObjectName("primary")
+        self.next_btn = W.HwButton("", "red", icon="play", min_h=44)
         self.next_btn.clicked.connect(lambda: self.win.next_song(0))
         self.next_btn.hide()
         row.addWidget(self.next_btn)
         bl.addLayout(row)
-        wrap = QVBoxLayout()
-        wrap.addWidget(box)
-        wrap.addStretch(1)
-        outer.addLayout(wrap)
+        col.addWidget(box, 1)
+        outer.addLayout(col, 6)
         outer.addStretch(1)
         self.show_result([], "")
 
@@ -86,18 +104,18 @@ class ExportPage(QWidget):
 
     def show_result(self, files, folder):
         self.folder = folder
-        t = self.win.t
-        self.icon.setPixmap(icons.check(t["ok"]).pixmap(34, 34))
         self.icon.setVisible(bool(files))
-        self.title.setText(f"Exported {len(files)} file{'s' if len(files) != 1 else ''}"
-                           if files else "Nothing exported yet")
+        self.title.setText(f"EXPORTED {len(files)} FILE{'S' if len(files) != 1 else ''}"
+                           if files else "NOTHING EXPORTED YET")
         self.path.setText(folder)
-        self.list.clear()
-        for p in files:
+        self.path.setCursorPosition(0)
+        self.list.setRowCount(len(files))
+        for i, p in enumerate(files):
             try:
                 size = os.path.getsize(p)
                 s = f"{size / 1e6:.1f} MB" if size > 1e6 else f"{size // 1000} KB"
             except OSError:
                 s = ""
-            self.list.addItem(f"{os.path.basename(p)}    {s}")
+            self.list.setItem(i, 0, QTableWidgetItem(os.path.basename(p)))
+            self.list.setItem(i, 1, QTableWidgetItem(s))
         self.open.setEnabled(bool(files))

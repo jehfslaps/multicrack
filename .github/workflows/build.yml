@@ -38,6 +38,7 @@ jobs:
           pyinstaller --noconfirm --clean --onefile --windowed
           --name MultiCrack --icon assets/MultiCrack.ico
           --add-data "assets/models;assets/models"
+          --add-data "assets/fonts;assets/fonts"
           --collect-all sherpa_onnx
           --exclude-module tkinter --exclude-module matplotlib
           MultiCrack.py

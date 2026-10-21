@@ -1,98 +1,196 @@
-"""Step 2: hear, trim, relabel and approve every chop."""
+"""Step 2: hear, trim, relabel and approve every chop (hardware skin)."""
 from __future__ import annotations
 
+import math
 import os
 import tempfile
 
-from PySide6.QtCore import QMimeData, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QDrag
-from PySide6.QtWidgets import (QApplication, QCheckBox, QDoubleSpinBox, QFrame, QHBoxLayout,
-                               QLayout, QLineEdit, QProgressBar, QPushButton, QScrollArea,
-                               QScrollBar, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtCore import QMimeData, QPointF, QRectF, Qt, QTimer, QUrl
+from PySide6.QtGui import QColor, QDrag, QPainter, QPen
+from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
+                               QScrollArea, QScrollBar, QSizePolicy, QSlider, QVBoxLayout,
+                               QWidget)
 
 from ..core.audio import default_fades_ms, render_chop, write_wav24
 from ..core.naming import assign_names
-from . import icons
-from .common import fmt_len, label, label_combo, magnet_to_hit, panel
+from .common import label_combo, magnet_to_hit
+from .skin import core as K
+from .skin import widgets as W
 from .waveform import MiniWave, TrimEditor
 
 DRAG_DIR = os.path.join(tempfile.gettempdir(), "MultiCrack", "drag")
 
+# list columns (fixed widths; the waveform column stretches)
+COL_WIDE = dict(grip=18, num=30, play=40, name=292, dur=92, type=164, approve=142, clone=36,
+                delete=36)
+COL_NARROW = dict(grip=16, num=26, play=40, name=206, dur=80, type=132, approve=116, clone=34,
+                  delete=34)
+COL = dict(COL_WIDE)
+ROW_MARGINS = (12, 6, 16, 6)
+ROW_SPACING = 12
+
+
+def is_warning(flag: str) -> bool:
+    """AI suggestions are information; cut tails / tempo problems are warnings."""
+    return bool(flag) and not flag.startswith("AI suggestion")
+
+
+def fmt_dur(samples, sr):
+    t = samples / float(sr)
+    m = int(t // 60)
+    return f"{m}:{t - 60 * m:06.3f}"
+
+
+def _fixed(w, width):
+    w.setFixedWidth(width)
+    return w
+
+
+class ColumnHeader(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(*ROW_MARGINS)
+        lay.setSpacing(ROW_SPACING)
+        self.setFixedHeight(34)
+
+        def h(text, w=None):
+            lb = W.cap(text, "header_text", 11, 600, 1.4)
+            if w:
+                lb.setFixedWidth(w)
+            return lb
+        lay.addWidget(h("", COL["grip"]))
+        lay.addWidget(h("#", COL["num"]))
+        lay.addWidget(h("", COL["play"]))
+        lay.addWidget(h("File / stem", COL["name"]))
+        lay.addWidget(h("Waveform"), 1)
+        lay.addWidget(h("Duration", COL["dur"]))
+        lay.addWidget(h("Type", COL["type"]))
+        lay.addWidget(h("Actions", COL["approve"] + COL["clone"] + COL["delete"] + 2 * ROW_SPACING))
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setPen(QPen(QColor("#3A3D42"), 1))
+        p.drawLine(QPointF(8, self.height() - 0.5), QPointF(self.width() - 8, self.height() - 0.5))
+
+
+class GroupHeader(QFrame):
+    def __init__(self, page, st, count):
+        super().__init__()
+        self.setFixedHeight(42)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(16, 4, 16, 4)
+        lay.setSpacing(12)
+        name = W.mono(st.name, "on_dark", 13.5, 600, 0.4)
+        lay.addWidget(name)
+        lay.addWidget(W.cap(f"{st.kind}  ·  {count} chop{'s' if count != 1 else ''}",
+                            "on_dark_muted", 11, 500, 1.4))
+        lay.addStretch(1)
+        for text, tip, fn in (
+                ("Approve all", "Approve every chop from this stem", lambda: page.approve_stem(st)),
+                ("Remove all", "Remove every chop from this stem (Ctrl+Z brings them back)",
+                 lambda: page.remove_stem_chops(st)),
+                ("Loop options" if (st.engine == "groove" and st.mode == "auto") else "Edit regions",
+                 "", lambda: page.win.open_stem(st))):
+            b = W.HwButton(text, "dark", min_h=28, px=10.5)
+            if tip:
+                b.setToolTip(tip)
+            b.clicked.connect(fn)
+            lay.addWidget(b)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        r = QRectF(self.rect())
+        p.fillRect(r, QColor(0, 0, 0, 70))
+        p.setPen(QPen(QColor(0, 0, 0, 160), 1))
+        p.drawLine(QPointF(0, 0.5), QPointF(r.width(), 0.5))
+        p.setPen(QPen(QColor(255, 255, 255, 12), 1))
+        p.drawLine(QPointF(0, r.height() - 0.5), QPointF(r.width(), r.height() - 0.5))
+        p.fillRect(QRectF(0, 0, 3, r.height()), K.C("outline", 200))
+
 
 class ChopRow(QFrame):
-    def __init__(self, page, chop, stem):
+    def __init__(self, page, chop, stem, number):
         super().__init__()
         self.page, self.chop, self.stem = page, chop, stem
         self._press = None
-        self.setObjectName("row")
-        self.setProperty("selected", "false")
-        self.setMinimumHeight(62)
+        self._hover = False
+        self.selected = False
+        self.setAttribute(Qt.WA_Hover)
+        self.setFixedHeight(60)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setToolTip("Drag this row into FL Studio (or any folder) to use the sample right away")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 6, 12, 6)
-        lay.setSpacing(12)
-        t = page.win.t
+        lay.setContentsMargins(*ROW_MARGINS)
+        lay.setSpacing(ROW_SPACING)
 
-        self.play = QToolButton()
-        self.play.setFixedSize(36, 36)
-        self.play.setIcon(icons.play(t["text"]))
-        self.play.setIconSize(QSize(14, 14))
-        self.play.setToolTip("Play and load into the trim editor (Space)")
-        self.play.setStyleSheet("border-radius: 18px;")
+        lay.addWidget(_fixed(W.IconLabel("grip", "on_dark_dim", COL["grip"]), COL["grip"]))
+        self.num = _fixed(W.mono(str(number), "on_dark_muted", 13, 500, 0.4), COL["num"])
+        lay.addWidget(self.num)
+        self.play = W.HwButton("", "round", icon="play", min_h=COL["play"])
+        self.play.setToolTip("Play and load into the editor (Space)")
         self.play.clicked.connect(lambda: page.select(self.chop, play=True))
         lay.addWidget(self.play)
 
         names = QVBoxLayout()
-        names.setSpacing(1)
-        self.name = label("", "mono")
-        self.name.setMinimumWidth(240)
+        names.setSpacing(2)
+        names.setContentsMargins(0, 0, 0, 0)
+        self.name = W.mono("", "on_dark", 13.5, 500, 0.3)
         names.addWidget(self.name)
-        self.sub = label("", "muted")
+        self.sub = W.cap("", "on_dark_muted", 11, 500, 1.1)
         names.addWidget(self.sub)
         holder = QWidget()
         holder.setLayout(names)
-        holder.setFixedWidth(300)
+        holder.setFixedWidth(COL["name"])
         lay.addWidget(holder)
-
-        self.combo = label_combo(chop.label)
-        self.combo.setFixedWidth(170)
-        self.combo.setFocusPolicy(Qt.ClickFocus)
-        self.combo.currentTextChanged.connect(self._label_changed)
-        lay.addWidget(self.combo)
 
         self.wave = MiniWave()
         lay.addWidget(self.wave, 1)
-
-        self.dur = label("", "muted")
-        self.dur.setFixedWidth(64)
+        self.dur = _fixed(W.mono("", "on_dark", 13, 400, 0.4), COL["dur"])
         lay.addWidget(self.dur)
 
-        self.thumb = QToolButton()
-        self.thumb.setObjectName("thumb")
-        self.thumb.setCheckable(True)
-        self.thumb.setFixedSize(42, 36)
-        self.thumb.setIconSize(QSize(18, 18))
-        self.thumb.setToolTip("Approve (A approves and moves to the next chop)")
-        self.thumb.setChecked(chop.approved)
-        self.thumb.clicked.connect(lambda on: page.set_approved(self.chop, on))
-        lay.addWidget(self.thumb)
+        self.combo = label_combo(chop.label)
+        self.combo.setObjectName("flat")
+        self.combo.setFixedWidth(COL["type"])
+        self.combo.setFocusPolicy(Qt.ClickFocus)
+        self.combo.setMinimumWidth(COL["type"])
+        self.combo.currentTextChanged.connect(self._label_changed)
+        lay.addWidget(self.combo)
 
-        self.clone_btn = QToolButton()
-        self.clone_btn.setFixedSize(34, 36)
-        self.clone_btn.setIconSize(QSize(17, 17))
-        self.clone_btn.setToolTip("Clone this chop (Ctrl+D): adds a copy right below that you "
-                                  "can trim or label differently")
+        self.approve = W.ApprovePill(width=COL["approve"])
+        self.approve.setToolTip("Approve (A approves and moves to the next chop)")
+        self.approve.setChecked(chop.approved)
+        self.approve.clicked.connect(lambda on: page.set_approved(self.chop, on))
+        lay.addWidget(self.approve)
+        self.clone_btn = W.HwButton("", "icon", icon="copy", min_h=COL["clone"])
+        self.clone_btn.setToolTip("Clone this chop (Ctrl+D)")
         self.clone_btn.clicked.connect(lambda: page.clone_chop(self.chop))
         lay.addWidget(self.clone_btn)
-
-        self.del_btn = QToolButton()
-        self.del_btn.setFixedSize(34, 36)
-        self.del_btn.setIconSize(QSize(17, 17))
+        self.del_btn = W.HwButton("", "icon", icon="trash", min_h=COL["delete"])
         self.del_btn.setToolTip("Delete this chop (Delete key)")
         self.del_btn.clicked.connect(lambda: page.delete_chop(self.chop))
         lay.addWidget(self.del_btn)
         self.update_view()
+
+    # ---- painting
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        r = QRectF(self.rect())
+        if self.selected:
+            p.fillRect(r, K.C("row_sel"))
+            p.fillRect(QRectF(0, 0, 4, r.height()), K.C("red_hi"))
+        elif self._hover:
+            p.fillRect(r, K.C("row_hover"))
+        p.setPen(QPen(K.C("row_line"), 1))
+        p.drawLine(QPointF(8, r.height() - 0.5), QPointF(r.width() - 8, r.height() - 0.5))
 
     # ---- mouse: click selects, drag exports the sample
     def mousePressEvent(self, e):
@@ -125,48 +223,38 @@ class ChopRow(QFrame):
                 self.page.setFocus()
 
     def update_thumb(self):
-        t = self.page.win.t
-        self.thumb.blockSignals(True)
-        self.thumb.setChecked(self.chop.approved)
-        self.thumb.blockSignals(False)
-        self.thumb.setIcon(icons.thumb(t["on_ok"] if self.chop.approved else t["muted"]))
-        self.clone_btn.setIcon(icons.copy(t["muted"]))
-        self.del_btn.setIcon(icons.trash(t["muted"]))
+        self.approve.blockSignals(True)
+        self.approve.setChecked(self.chop.approved)
+        self.approve.blockSignals(False)
+        self.approve.update()
 
     def update_view(self):
         self.name.setText(self.page.names.get(self.chop.id, ""))
-        sub = f"from {self.stem.name}"
-        extras = []
+        bits = [f"Stem: {self.stem.kind}"]
         if self.chop.reverse:
-            extras.append("reversed")
+            bits.append("reversed")
         if self.chop.gain_db:
-            extras.append(f"{self.chop.gain_db:+.1f} dB")
-        if extras:
-            sub += " · " + ", ".join(extras)
-        if self.chop.flag:
-            sub += f" · {self.chop.flag}"
+            bits.append(f"{self.chop.gain_db:+.1f} dB")
+        sub = "  ·  ".join(bits)
+        full = sub + (f"  ·  {self.chop.flag}" if self.chop.flag else "")
         fm = self.sub.fontMetrics()
-        self.sub.setText(fm.elidedText(sub, Qt.ElideRight, 292))
-        self.sub.setToolTip(sub)
-        self.sub.setObjectName("warn" if self.chop.flag else "muted")
-        self.sub.style().unpolish(self.sub)
-        self.sub.style().polish(self.sub)
-        self.dur.setText(fmt_len(self.chop.length, self.stem.sr))
+        self.sub.setText(fm.elidedText(full.upper(), Qt.ElideRight, COL["name"] - 4))
+        self.sub.setToolTip(f"From {self.stem.name}" + (f"\n{self.chop.flag}" if self.chop.flag else ""))
+        W.recolor(self.sub, "warn" if is_warning(self.chop.flag) else "on_dark_muted")
+        self.dur.setText(fmt_dur(self.chop.length, self.stem.sr))
         self.wave.set_chop(self.page.win.peaks(self.stem), self.chop.start, self.chop.end,
                            self.chop.reverse)
         self.update_thumb()
 
     def set_selected(self, on):
-        self.setProperty("selected", "true" if on else "false")
-        self.style().unpolish(self)
-        self.style().polish(self)
+        self.selected = on
+        self.update()
 
 
 class ReviewPage(QWidget):
     def __init__(self, win):
         super().__init__()
         self.win = win
-        self.setObjectName("page")
         self.rows: dict = {}
         self.names: dict = {}
         self.selected = None
@@ -174,155 +262,181 @@ class ReviewPage(QWidget):
         self._loading_fx = False
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(16, 14, 16, 16)
+        outer.setContentsMargins(0, 4, 0, 0)
         outer.setSpacing(12)
 
-        top = QHBoxLayout()
-        col = QVBoxLayout()
-        col.setSpacing(6)
-        self.count_lbl = label("", "h2")
-        col.addWidget(self.count_lbl)
-        self.progress = QProgressBar()
-        self.progress.setTextVisible(False)
-        self.progress.setFixedWidth(280)
-        col.addWidget(self.progress)
-        top.addLayout(col)
-        top.addStretch(1)
-        self.undo_btn = QPushButton("Undo")
+        # ---------------------------------------------------------- header
+        head = W.Module("", margins=(22, 12, 22, 12))
+        hl = QHBoxLayout()
+        hl.setSpacing(14)
+        self.count_lbl = W.mono("", "on_dark", 22, 600, 2.4)
+        self.count_lbl.setMinimumWidth(250)
+        hl.addWidget(self.count_lbl)
+        self.meter = W.LedMeter(28)
+        self.meter.setMaximumWidth(420)
+        self.meter.setFixedHeight(32)
+        hl.addWidget(self.meter, 1)
+        hl.addSpacing(10)
+        self.undo_btn = W.HwButton("Undo", "key", icon="undo", min_h=42)
         self.undo_btn.setToolTip("Undo (Ctrl+Z)")
         self.undo_btn.clicked.connect(self.win.undo)
-        top.addWidget(self.undo_btn)
-        self.redo_btn = QPushButton("Redo")
+        self.redo_btn = W.HwButton("Redo", "key", icon="redo", min_h=42)
         self.redo_btn.setToolTip("Redo (Ctrl+Y)")
         self.redo_btn.clicked.connect(self.win.redo)
-        top.addWidget(self.redo_btn)
-        top.addSpacing(12)
-        self.approve_all = QPushButton("Approve all")
+        self.approve_all = W.HwButton("Approve all", "key", icon="check", min_h=42)
         self.approve_all.clicked.connect(self.approve_everything)
-        top.addWidget(self.approve_all)
-        self.export_btn = QPushButton("Export")
-        self.export_btn.setObjectName("primary")
+        self.export_btn = W.HwButton("Export", "red", icon="export", min_h=42)
         self.export_btn.clicked.connect(self.win.export_all)
-        top.addWidget(self.export_btn)
-        outer.addLayout(top)
+        for b in (self.undo_btn, self.redo_btn, self.approve_all):
+            b.setMinimumWidth(128)
+            hl.addWidget(b)
+        hl.addSpacing(6)
+        self.export_btn.setMinimumWidth(230)
+        hl.addWidget(self.export_btn)
+        head.lay.addLayout(hl)
+        outer.addWidget(head)
 
-        # ---------------------------------------------------------- trim editor
-        ep, el = panel(spacing=8, margins=(14, 12, 14, 12))
-        head = QHBoxLayout()
-        self.ed_name = label("", "mono")
-        f = self.ed_name.font()
-        f.setBold(True)
-        self.ed_name.setFont(f)
-        head.addWidget(self.ed_name)
-        head.addStretch(1)
-        head.addWidget(label("Drag the blue handles to trim, or drag across the waveform to pick "
-                             "a new section. Scroll to zoom, Shift+scroll to move.", "muted"))
-        el.addLayout(head)
+        # ------------------------------------------------------ trim module
+        trim = W.Module("", margins=(18, 12, 18, 12))
+        tl = trim.lay
+        tl.setSpacing(10)
+        th = QHBoxLayout()
+        self.ed_name = W.mono("", "on_dark", 15.5, 500, 0.6)
+        th.addWidget(self.ed_name)
+        th.addStretch(1)
+        self.sel_readout = W.Lcd("", "", value_px=13.5, min_w=210)
+        self.sel_readout.setFixedHeight(34)
+        th.addWidget(self.sel_readout)
+        tl.addLayout(th)
         self.editor = TrimEditor()
         self.editor.changed.connect(self._trimmed)
-        el.addWidget(self.editor)
+        self.editor.selectionChanged.connect(lambda s, e: self._update_readout(s, e))
+        tl.addWidget(self.editor, 1)
         self.ed_scroll = QScrollBar(Qt.Horizontal)
         self.ed_scroll.valueChanged.connect(self._scrolled)
         self.editor.viewChanged.connect(self._view_changed)
-        el.addWidget(self.ed_scroll)
+        tl.addWidget(self.ed_scroll)
 
-        # row 1: transport, snap, zoom
-        er = QHBoxLayout()
-        self.ed_play = QPushButton("Play")
-        self.ed_play.setToolTip("Play / stop (Space)")
-        self.ed_play.clicked.connect(self.toggle_play)
-        er.addWidget(self.ed_play)
-        self.ed_loop = self._toggle("Loop: Off", "Loop playback (L key). Loops always repeat so "
-                                    "you can hear the seam; this repeats every other chop too.",
-                                    "loop_play", False, self._loop_toggled)
-        er.addWidget(self.ed_loop)
-        self.ed_reset = QPushButton("Reset trim")
+        # row 1: transport, loop, reset, snap, zoom, warning
+        r1 = QHBoxLayout()
+        r1.setSpacing(8)
+        tp = W.Tile(margins=(6, 4, 6, 4))
+        self.ed_play = W.HwButton("", "key", icon="play", min_h=40, icon_size=18)
+        self.ed_play.setFixedWidth(50)
+        self.ed_play.setToolTip("Play (Space)")
+        self.ed_play.clicked.connect(self.play_selected)
+        self.ed_stop = W.HwButton("", "key", icon="stop", min_h=40, icon_size=18)
+        self.ed_stop.setFixedWidth(50)
+        self.ed_stop.setToolTip("Stop (Space)")
+        self.ed_stop.clicked.connect(self.win.player.stop)
+        tp.lay.addWidget(self.ed_play)
+        tp.lay.addWidget(self.ed_stop)
+        r1.addWidget(tp)
+        self.ed_loop = W.LedToggle("Loop", "green", icon="loop", min_h=50)
+        self.ed_loop.setToolTip("Loop playback (L). Loop chops always repeat so you can hear the seam.")
+        self.ed_loop.setChecked(self.win.settings.value("loop_play", "false") == "true")
+        self.ed_loop.toggled.connect(self._loop_toggled)
+        r1.addWidget(self.ed_loop)
+        self.ed_reset = W.HwButton("Reset trim", "dark", icon="reset", min_h=50, px=11.5)
         self.ed_reset.clicked.connect(self.reset_trim)
-        er.addWidget(self.ed_reset)
-        self.ed_snap = self._toggle("Snap: On", "Snap (S key). On: a start flag dropped within "
-                                    "about 12 ms of a hit lines up with its attack. Off: the flags "
-                                    "stay exactly where you drop them, no snapping at all.",
-                                    "snap_trim", True, self._snap_toggled)
-        er.addWidget(self.ed_snap)
-        er.addSpacing(12)
-        for text, tip, fn in (("−", "Zoom out", lambda: self.editor.zoom(1.6)),
-                              ("+", "Zoom in", lambda: self.editor.zoom(0.6)),
-                              ("Zoom to chop", "Frame the selected section", self.editor.show_chop),
-                              ("Whole stem", "Show the entire stem", self.editor.show_all)):
-            b = QPushButton(text)
-            b.setToolTip(tip)
-            if len(text) == 1:
-                b.setFixedWidth(36)
-            b.clicked.connect(fn)
-            er.addWidget(b)
-        self.ed_flag = label("", "warn", wrap=True)
-        er.addWidget(self.ed_flag, 1)
-        el.addLayout(er)
+        r1.addWidget(self.ed_reset)
+        self.ed_snap = W.LedToggle("Snap", "green", icon="magnet", min_h=50)
+        self.ed_snap.setToolTip("Snap (S). On: a start dropped within about 12 ms of a hit lines "
+                                "up with its attack. Off: no snapping at all.")
+        self.ed_snap.setChecked(self.win.settings.value("snap_trim", "true") == "true")
+        self.ed_snap.toggled.connect(self._snap_toggled)
+        r1.addWidget(self.ed_snap)
+        zt = W.Tile(margins=(12, 4, 8, 4))
+        zt.lay.addWidget(W.cap("Zoom", "on_dark", 11.5, 600, 1.6))
+        zo = W.HwButton("", "icon", icon="minus", min_h=30)
+        zo.setToolTip("Zoom out")
+        zo.clicked.connect(lambda: self.editor.zoom(1.6))
+        zt.lay.addWidget(zo)
+        self.zoom_slider = QSlider(Qt.Horizontal)
+        self.zoom_slider.setRange(0, 1000)
+        self.zoom_slider.setMinimumWidth(120)
+        self.zoom_slider.valueChanged.connect(self._zoom_slid)
+        zt.lay.addWidget(self.zoom_slider, 1)
+        zi = W.HwButton("", "icon", icon="plus", min_h=30)
+        zi.setToolTip("Zoom in")
+        zi.clicked.connect(lambda: self.editor.zoom(0.6))
+        zt.lay.addWidget(zi)
+        zc = W.HwButton("Chop", "dark", min_h=30, px=10.5)
+        zc.setToolTip("Zoom to the chop")
+        zc.clicked.connect(self.editor.show_chop)
+        zt.lay.addWidget(zc)
+        r1.addWidget(zt, 1)
+        self.whole_btn = W.HwButton("Whole stem", "dark", icon="expand", min_h=50, px=11.5)
+        self.whole_btn.setToolTip("Show the entire stem")
+        self.whole_btn.clicked.connect(self.editor.show_all)
+        r1.addWidget(self.whole_btn)
+        self.warn_tile = W.Tile(alert=True, margins=(12, 4, 14, 4))
+        self.warn_icon = W.IconLabel("warning", "warn", 22)
+        self.warn_tile.lay.addWidget(self.warn_icon)
+        self.ed_flag = W.mono("", "warn", 13, 500, 0.3)
+        self.warn_tile.lay.addWidget(self.ed_flag, 1)
+        self.warn_tile.setMinimumWidth(220)
+        r1.addWidget(self.warn_tile, 1)
+        tl.addLayout(r1)
 
         # row 2: per-chop sound controls
-        fx = QHBoxLayout()
-        fx.addWidget(label("Fade in"))
-        self.fade_in = self._spin(0, 5000, " ms", 1, "Fade-in length. The default is a tiny "
-                                  "automatic de-click.")
-        fx.addWidget(self.fade_in)
-        fx.addWidget(label("Fade out"))
-        self.fade_out = self._spin(0, 10000, " ms", 1, "Fade-out length. The default is a short "
-                                   "automatic de-click.")
-        fx.addWidget(self.fade_out)
-        self.fade_auto = QPushButton("Auto fades")
-        self.fade_auto.setToolTip("Back to the automatic de-click fades")
-        self.fade_auto.clicked.connect(self._auto_fades)
-        fx.addWidget(self.fade_auto)
-        fx.addSpacing(12)
-        self.ed_reverse = self._toggle("Reverse: Off", "Play and export this chop backwards "
-                                       "(R key). The file name gets 'Rev'.", None, False,
-                                       self._reverse_toggled)
-        fx.addWidget(self.ed_reverse)
-        fx.addSpacing(12)
-        fx.addWidget(label("Gain"))
-        self.gain = self._spin(-48, 0, " dB", 0.5, "Every sample is normalized to full level "
-                               "(−0.1 dB). Use this to turn one down from there.")
-        self.gain.setDecimals(1)
-        fx.addWidget(self.gain)
-        fx.addSpacing(12)
-        self.ed_seam = self._toggle("Smooth loop seam: On", "Loops only: blends the very end of "
-                                    "the loop into what comes just before its start, so it "
-                                    "repeats without a click. Length stays exactly on the bars.",
-                                    None, True, self._seam_toggled)
-        fx.addWidget(self.ed_seam)
-        fx.addStretch(1)
-        el.addLayout(fx)
+        r2 = QHBoxLayout()
+        r2.setSpacing(8)
+        self.fade_in = W.KnobTile("Fade in", 0, 5000, " ms", 1, step=0.5, decimals=1, curve=3.2,
+                                  tip="Fade-in length. Auto = a tiny de-click.")
+        self.fade_out = W.KnobTile("Fade out", 0, 10000, " ms", 8, step=0.5, decimals=1, curve=3.2,
+                                   tip="Fade-out length. Auto = a short de-click.")
+        self.gain = W.KnobTile("Gain", -48, 0, " dB", 0, step=0.5, decimals=1,
+                               tip="Every sample is normalized to −0.1 dB. Turn one down from there.")
+        self.fade_auto = W.LedToggle("Auto fades", "green", min_h=56)
+        self.fade_auto.setToolTip("On: automatic de-click fades. Turn a fade knob to set your own.")
+        self.fade_auto.clicked.connect(self._auto_clicked)
+        self.ed_reverse = W.LedToggle("Reverse", "red", icon="reverse", min_h=56)
+        self.ed_reverse.setToolTip("Play and export this chop backwards (R). The file name gets 'Rev'.")
+        self.ed_reverse.toggled.connect(self._reverse_toggled)
+        self.ed_seam = W.LedToggle("Smooth loop seam", "red", min_h=56)
+        self.ed_seam.setToolTip("Loops: blends the end into what comes just before the start, so "
+                                "it repeats without a click. Length stays on the bars.")
+        self.ed_seam.toggled.connect(self._seam_toggled)
+        for w in (self.fade_in, self.fade_out):
+            r2.addWidget(w, 3)
+        r2.addWidget(self.fade_auto, 2)
+        r2.addWidget(self.ed_reverse, 2)
+        r2.addWidget(self.gain, 3)
+        r2.addWidget(self.ed_seam, 3)
+        tl.addLayout(r2)
         self.fade_in.valueChanged.connect(lambda v: self._fx_changed("fade_in_ms", v))
         self.fade_out.valueChanged.connect(lambda v: self._fx_changed("fade_out_ms", v))
         self.gain.valueChanged.connect(lambda v: self._fx_changed("gain_db", v))
-        outer.addWidget(ep)
+        outer.addWidget(trim, 6)
 
         # ------------------------------------------------------------- list
+        lm = W.Module("", margins=(8, 8, 8, 10))
+        lm.lay.setSpacing(0)
+        self.col_header = ColumnHeader()
+        lm.lay.addWidget(self.col_header)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.listw = QWidget()
         self.list_lay = QVBoxLayout(self.listw)
-        self.list_lay.setSizeConstraint(QLayout.SetMinimumSize)   # never squash the rows
+        self.list_lay.setSizeConstraint(QLayout.SetMinimumSize)
         self.list_lay.setContentsMargins(0, 0, 0, 0)
         self.list_lay.setSpacing(0)
-        frame, fl = panel(margins=(0, 0, 0, 0), spacing=0)
-        fl.addWidget(self.scroll)
         self.scroll.setWidget(self.listw)
-        outer.addWidget(frame, 1)
-
-        self.empty = label("Nothing to review yet. Load stems and press Process all.", "muted")
+        lm.lay.addWidget(self.scroll, 1)
+        self.empty = W.mono("NOTHING TO REVIEW YET  ·  LOAD STEMS AND PRESS PROCESS ALL",
+                            "on_dark_dim", 12.5, 500, 2.0)
         self.empty.setAlignment(Qt.AlignCenter)
-        outer.addWidget(self.empty)
+        lm.lay.addWidget(self.empty)
+        self.list_mod = lm
+        outer.addWidget(lm, 7)
 
         self.setFocusPolicy(Qt.StrongFocus)
         self.scroll.setFocusPolicy(Qt.NoFocus)
-        # buttons shouldn't steal the keyboard from the list (arrows, Delete, Space)
-        for cls in (QPushButton, QCheckBox, QScrollBar, QToolButton):
+        for cls in (W.HwButton, W.LedToggle, QScrollBar, QSlider):
             for w_ in self.findChildren(cls):
                 w_.setFocusPolicy(Qt.NoFocus)
-        for sp in (self.fade_in, self.fade_out, self.gain):
-            sp.setFocusPolicy(Qt.ClickFocus)
 
         self._fx_timer = QTimer(self)
         self._fx_timer.setSingleShot(True)
@@ -333,32 +447,6 @@ class ReviewPage(QWidget):
         self._ph_timer.timeout.connect(self._tick)
         self._ph_timer.start()
         self._ph_row = None
-
-    # ---------------------------------------------------------------- helpers
-    def _toggle(self, text, tip, setting, default, slot):
-        b = QToolButton()
-        b.setObjectName("seg")
-        b.setCheckable(True)
-        b.setMinimumHeight(34)
-        b.setToolTip(tip)
-        b.setText(text)
-        if setting:
-            b.setChecked(self.win.settings.value(setting, "true" if default else "false") == "true")
-        else:
-            b.setChecked(default)
-        b.toggled.connect(slot)
-        return b
-
-    def _spin(self, lo, hi, suffix, step, tip):
-        s = QDoubleSpinBox()
-        s.setRange(lo, hi)
-        s.setSuffix(suffix)
-        s.setSingleStep(step)
-        s.setDecimals(1)
-        s.setFixedWidth(104)
-        s.setToolTip(tip)
-        s.setKeyboardTracking(False)
-        return s
 
     # ------------------------------------------------------------------ build
     def rebuild(self):
@@ -371,23 +459,27 @@ class ReviewPage(QWidget):
         self.names = self._compute_names()
         stems = {s.id: s for s in self.win.stems}
         last = None
+        number = 0
         for c in self.win.chops:
             st = stems.get(c.stem_id)
             if st is None:
                 continue
             if st.id != last:
-                self.list_lay.addWidget(self._header(st))
+                n = sum(1 for x in self.win.chops if x.stem_id == st.id)
+                self.list_lay.addWidget(GroupHeader(self, st, n))
                 last = st.id
-            row = ChopRow(self, c, st)
+            number += 1
+            row = ChopRow(self, c, st, number)
             self.rows[c.id] = row
             self.list_lay.addWidget(row)
         self.list_lay.addStretch(1)
-        for cls in (QPushButton, QToolButton):
+        for cls in (W.HwButton, W.ApprovePill):
             for w_ in self.listw.findChildren(cls):
                 w_.setFocusPolicy(Qt.NoFocus)
         has = bool(self.win.chops)
         self.empty.setVisible(not has)
-        self.scroll.parentWidget().setVisible(has)
+        self.scroll.setVisible(has)
+        self.col_header.setVisible(has)
         if self.selected is None or self.selected.id not in self.rows:
             self.selected = None
             if self.win.chops:
@@ -395,35 +487,11 @@ class ReviewPage(QWidget):
             else:
                 self.editor.clear()
                 self.ed_name.setText("")
-                self.ed_flag.setText("")
+                self._set_flag("")
+                self.sel_readout.set(value="")
         else:
             self.select(self.selected, play=False)
         self.counts_changed()
-
-    def _header(self, st):
-        hdr = QFrame()
-        hdr.setObjectName("groupHeader")
-        hdr.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(12, 6, 12, 6)
-        mine = [x for x in self.win.chops if x.stem_id == st.id]
-        n = len(mine)
-        hl.addWidget(label(f"{st.name}", "h2"))
-        hl.addWidget(label(f"{st.kind} · {n} chop{'s' if n != 1 else ''}", "muted"))
-        hl.addStretch(1)
-        for text, tip, fn in (
-                ("Approve all", "Approve every chop from this stem", lambda: self.approve_stem(st)),
-                ("Remove all", "Remove every chop from this stem (Ctrl+Z brings them back)",
-                 lambda: self.remove_stem_chops(st)),
-                ("Loop options" if (st.engine == "groove" and st.mode == "auto") else "Edit regions",
-                 "", lambda: self.win.open_stem(st))):
-            b = QPushButton(text)
-            b.setObjectName("link")
-            if tip:
-                b.setToolTip(tip)
-            b.clicked.connect(fn)
-            hl.addWidget(b)
-        return hdr
 
     def _compute_names(self):
         return assign_names(self.win.chops, self.win.prefix(), self.win.output_folder())
@@ -439,30 +507,80 @@ class ReviewPage(QWidget):
         chops = self.win.chops
         n = len(chops)
         a = sum(1 for c in chops if c.approved)
-        self.count_lbl.setText(f"{a} of {n} approved" if n else "No chops yet")
-        self.progress.setRange(0, max(1, n))
-        self.progress.setValue(a)
+        self.count_lbl.setText(f"{a} OF {n} APPROVED" if n else "NO CHOPS YET")
+        self.meter.set(a / n if n else 0)
         done = n > 0 and a == n
         self.export_btn.setEnabled(done and not self.win.busy)
-        self.export_btn.setText(f"Export {n} files" if done else "Export (approve all first)")
+        narrow = getattr(self, "_compact", (False, False))[0]
+        self.export_btn.setText(f"Export {n} files" if done else ("Export" if narrow else
+                                                                   "Export (approve all)"))
+        self.export_btn.setToolTip("" if done else "Approve every chop to export")
         self.approve_all.setEnabled(n > 0 and not done)
         self.undo_btn.setEnabled(self.win.history.can_undo())
         self.redo_btn.setEnabled(self.win.history.can_redo())
         self.win.update_steps()
 
+    def set_compact(self, narrow, short):
+        if getattr(self, "_compact", None) == (narrow, short):
+            return
+        changed_cols = getattr(self, "_compact", (None, None))[0] != narrow
+        self._compact = (narrow, short)
+        COL.clear()
+        COL.update(COL_NARROW if narrow else COL_WIDE)
+        self.count_lbl.setFont(K.font(17 if narrow else 22, 600, 1.6 if narrow else 2.4))
+        self.count_lbl.setMinimumWidth(190 if narrow else 250)
+        self.meter.setMinimumWidth(80 if narrow else 240)
+        for b in (self.undo_btn, self.redo_btn, self.approve_all):
+            b.setMinimumWidth(96 if narrow else 128)
+        self.export_btn.setMinimumWidth(150 if narrow else 230)
+        for tg in (self.fade_auto, self.ed_reverse, self.ed_seam, self.ed_loop, self.ed_snap):
+            tg.show_state = not narrow
+            tg.updateGeometry()
+            tg.update()
+        self.ed_seam.label = "Seam" if narrow else "Smooth loop seam"
+        self.fade_auto.label = "Auto" if narrow else "Auto fades"
+        for kt in (self.fade_in, self.fade_out, self.gain):
+            kt.set_compact(narrow)
+        self.editor.setMinimumHeight(118 if short else 176)
+        self.whole_btn.setText("Whole" if narrow else "Whole stem")
+        self.counts_changed()
+        if changed_cols:
+            old = self.col_header
+            self.col_header = ColumnHeader()
+            self.list_mod.lay.replaceWidget(old, self.col_header)
+            old.deleteLater()
+            self.col_header.setVisible(bool(self.win.chops))
+            if self.rows:
+                self._rebuild_keep_scroll()
+
+    def _set_flag(self, text):
+        warn = is_warning(text)
+        self.ed_flag.setText(text)
+        self.warn_tile.set_alert(warn)
+        self.warn_icon.icon_name = "warning" if warn else "bulb"
+        self.warn_icon.color_key = "warn" if warn else "on_dark_muted"
+        self.warn_icon.update()
+        W.recolor(self.ed_flag, "warn" if warn else "on_dark_muted")
+        self.warn_tile.setVisible(bool(text))
+
+    def _update_readout(self, s, e):
+        st = self.win.stem_by_id(self.selected.stem_id) if self.selected is not None else None
+        if st is None:
+            self.sel_readout.set(value="")
+            return
+        extra = "  ·  REV" if self.selected.reverse else ""
+        self.sel_readout.set(value=f"{(e - s) / st.sr:.3f} S SELECTED{extra}")
+
     # ---------------------------------------------------------------- toggles
     def _snap_toggled(self, on):
-        self.ed_snap.setText("Snap: On" if on else "Snap: Off")
         self.win.settings.setValue("snap_trim", "true" if on else "false")
 
     def _loop_toggled(self, on):
-        self.ed_loop.setText("Loop: On" if on else "Loop: Off")
         self.win.settings.setValue("loop_play", "true" if on else "false")
         if self.win.player.playing_id is not None:
             self.play_selected()
 
     def _reverse_toggled(self, on):
-        self.ed_reverse.setText("Reverse: On" if on else "Reverse: Off")
         if self._loading_fx or self.selected is None or self.selected.reverse == on:
             return
         self.win.history.push()
@@ -471,7 +589,6 @@ class ReviewPage(QWidget):
         self.play_selected()
 
     def _seam_toggled(self, on):
-        self.ed_seam.setText("Smooth loop seam: On" if on else "Smooth loop seam: Off")
         if self._loading_fx or self.selected is None or self.selected.seam == on:
             return
         self.win.history.push()
@@ -485,12 +602,23 @@ class ReviewPage(QWidget):
         c = self.selected
         self.win.history.push(f"{attr}{c.id}")
         setattr(c, attr, float(v))
+        self.fade_auto.setChecked(c.fade_in_ms is None and c.fade_out_ms is None)
         self._after_fx()
         self._fx_timer.start()
 
     def _fx_settled(self):
         if self.selected is not None:
             self.play_selected()
+
+    def _auto_clicked(self, on):
+        c = self.selected
+        if c is None:
+            self.fade_auto.setChecked(False)
+            return
+        if on:
+            self._auto_fades()
+        else:   # can't turn "auto" off directly: turning a knob does that
+            self.fade_auto.setChecked(c.fade_in_ms is None and c.fade_out_ms is None)
 
     def _auto_fades(self):
         c = self.selected
@@ -510,6 +638,7 @@ class ReviewPage(QWidget):
         if row:
             row.update_view()
         self._update_editor_fx(c)
+        self._update_readout(c.start, c.end)
         self.win.session_changed()
 
     def _load_fx(self, c):
@@ -521,10 +650,10 @@ class ReviewPage(QWidget):
         self.gain.setValue(float(c.gain_db or 0.0))
         self.ed_reverse.setChecked(c.reverse)
         self.ed_seam.setChecked(c.seam)
-        self.ed_seam.setVisible(c.kind == "loop")
+        self.ed_seam.setEnabled(c.kind == "loop")
+        self.ed_seam.setToolTip("" if c.kind == "loop" else "Only for loops")
+        self.fade_auto.setChecked(c.fade_in_ms is None and c.fade_out_ms is None)
         self._loading_fx = False
-        self._reverse_toggled(c.reverse)
-        self._seam_toggled(c.seam)
         self._update_editor_fx(c)
 
     def _update_editor_fx(self, c):
@@ -683,7 +812,7 @@ class ReviewPage(QWidget):
         drag.setMimeData(mime)
         pm = row.wave.grab()
         if not pm.isNull():
-            drag.setPixmap(pm.scaledToWidth(min(220, pm.width()), Qt.SmoothTransformation))
+            drag.setPixmap(pm.scaledToWidth(min(220, max(1, pm.width())), Qt.SmoothTransformation))
         drag.exec(Qt.CopyAction)
 
     # ------------------------------------------------------------- editing
@@ -704,9 +833,10 @@ class ReviewPage(QWidget):
         if chop.id not in self._orig:
             self._orig[chop.id] = (chop.start, chop.end)
         self.ed_name.setText(self.names.get(chop.id, ""))
-        self.ed_flag.setText(chop.flag)
+        self._set_flag(chop.flag)
         self._load_editor(chop, st)
         self._load_fx(chop)
+        self._update_readout(chop.start, chop.end)
         if play:
             self.play_selected()
 
@@ -721,13 +851,31 @@ class ReviewPage(QWidget):
 
     def _view_changed(self, a, b):
         span = max(1, b - a)
+        n = max(1, self.editor.n)
         self.ed_scroll.blockSignals(True)
-        self.ed_scroll.setRange(0, max(0, self.editor.n - span))
+        self.ed_scroll.setRange(0, max(0, n - span))
         self.ed_scroll.setPageStep(span)
         self.ed_scroll.setSingleStep(max(1, span // 20))
         self.ed_scroll.setValue(a)
-        self.ed_scroll.setVisible(span < self.editor.n)
+        self.ed_scroll.setVisible(span < n)
         self.ed_scroll.blockSignals(False)
+        lo = max(1.0, 0.01 * self.editor.sr)
+        if n > lo:
+            v = math.log(span / n) / math.log(lo / n)
+            self.zoom_slider.blockSignals(True)
+            self.zoom_slider.setValue(int(round(max(0, min(1, v)) * 1000)))
+            self.zoom_slider.blockSignals(False)
+
+    def _zoom_slid(self, v):
+        n = max(1, self.editor.n)
+        lo = max(1.0, 0.01 * self.editor.sr)
+        if self.editor.cache is None or n <= lo:
+            return
+        span = n * (lo / n) ** (v / 1000.0)
+        a, b = self.editor.view_a, self.editor.view_b
+        sel_c = (self.editor.start + self.editor.end) / 2
+        center = sel_c if a <= sel_c <= b else (a + b) / 2
+        self.editor.set_view(int(center - span / 2), int(center + span / 2))
 
     def _scrolled(self, v):
         span = self.editor.view_b - self.editor.view_a
@@ -753,8 +901,6 @@ class ReviewPage(QWidget):
         p = self.win.player
         pos = p.position()
         playing = pos is not None
-        self.ed_play.setText("Stop" if playing and self.selected is not None
-                             and p.playing_id == self.selected.id else "Play")
         row = self.rows.get(p.playing_id) if playing else None
         if self._ph_row is not None and self._ph_row is not row:
             try:
@@ -764,8 +910,7 @@ class ReviewPage(QWidget):
         self._ph_row = row
         if row is not None:
             c = row.chop
-            frac = pos / max(1, c.length)
-            row.wave.set_playhead(min(1.0, frac))
+            row.wave.set_playhead(min(1.0, pos / max(1, c.length)))
         if playing and self.selected is not None and p.playing_id == self.selected.id:
             c = self.selected
             s = (c.end - pos) if c.reverse else (c.start + pos)
@@ -783,6 +928,7 @@ class ReviewPage(QWidget):
         row = self.rows.get(c.id)
         if row:
             row.update_view()
+        self._update_readout(c.start, c.end)
         self.win.session_changed()
         self.play_selected()
 
@@ -799,7 +945,4 @@ class ReviewPage(QWidget):
         self.win.session_changed()
 
     def retheme(self):
-        t = self.win.t
-        for r in self.rows.values():
-            r.play.setIcon(icons.play(t["text"]))
-            r.update_thumb()
+        self.update()

@@ -6,8 +6,8 @@ import shutil
 import time
 from dataclasses import replace
 
-from PySide6.QtCore import QSettings, QSize, QStandardPaths, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
+from PySide6.QtCore import QPoint, QSettings, QSize, QStandardPaths, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QKeySequence
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QFileDialog, QFrame, QHBoxLayout,
                                QLabel, QMainWindow, QMenu, QMessageBox, QPushButton,
@@ -17,7 +17,10 @@ from .. import APP_NAME
 from ..core import session, updater
 from ..core.audio import desktop_dir
 from ..core.songs import guess_names, split_songs
-from . import icons, theme
+from . import icons, skin, theme
+from .skin import core as K
+from .skin import dialogs
+from .skin import widgets as W
 from .export_page import ExportPage
 from .load_page import LoadPage
 from .loop_dialog import LoopDialog
@@ -132,55 +135,50 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"{APP_NAME} {updater.current_version()}")
         self.setWindowIcon(icons.app_icon())
-        self.resize(1360, 900)
+        self.resize(1480, 940)
         self.setMinimumSize(QSize(1040, 700))
 
-        central = QWidget()
-        central.setObjectName("page")
+        skin.apply(self.theme_name)
+        central = W.Chassis()
         v = QVBoxLayout(central)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(0)
+        v.setContentsMargins(22, 20, 22, 18)
+        v.setSpacing(14)
 
-        top = QFrame()
-        top.setObjectName("topbar")
-        tl = QHBoxLayout(top)
-        tl.setContentsMargins(12, 6, 12, 0)
-        tl.setSpacing(4)
-        self.steps = QButtonGroup(self)
-        self.step_btns = []
-        for i, name in enumerate(["1   Load", "2   Review", "3   Export"]):
-            b = QPushButton(name)
-            b.setObjectName("step")
-            b.setCheckable(True)
-            b.setFocusPolicy(Qt.NoFocus)
-            b.clicked.connect(lambda _c=False, i=i: self.go(i))
-            self.steps.addButton(b, i)
-            self.step_btns.append(b)
-            tl.addWidget(b)
-        tl.addStretch(1)
-        self.status_lbl = QLabel("")
-        self.status_lbl.setObjectName("muted")
-        tl.addWidget(self.status_lbl)
-        tl.addSpacing(12)
-        self.update_btn = QPushButton("")
-        self.update_btn.setObjectName("primary")
-        self.update_btn.setFocusPolicy(Qt.NoFocus)
+        top = QHBoxLayout()
+        top.setSpacing(14)
+        brand = W.Plate(margins=(26, 4, 22, 4))
+        brand.setFixedHeight(70)
+        self.brand_lbl = W.mono("MULTICRACK", "plate_text", 31, 700, 5.5)
+        brand.lay.addWidget(self.brand_lbl)
+        brand.lay.addSpacing(6)
+        self.version_badge = W.Badge(f"MC-1  [v{updater.current_version()}]")
+        brand.lay.addWidget(self.version_badge)
+        top.addWidget(brand)
+        self.steps_sel = W.StepSelector(["01 LOAD", "02 REVIEW", "03 EXPORT"])
+        self.steps_sel.setFixedHeight(64)
+        self.steps_sel.clicked.connect(self.go)
+        top.addWidget(self.steps_sel)
+        self.lcd = W.Lcd("SONG TEMPO", "— BPM", value_px=21, min_w=230)
+        self.lcd.setFixedHeight(64)
+        top.addWidget(self.lcd, 1)
+        self.update_btn = W.HwButton("Update", "red", icon="export", min_h=50, px=12.5)
         self.update_btn.hide()
         self.update_btn.clicked.connect(self.install_update)
-        tl.addWidget(self.update_btn, 0, Qt.AlignVCenter)
-        self.theme_btn = QPushButton()
-        self.theme_btn.setFocusPolicy(Qt.NoFocus)
+        top.addWidget(self.update_btn)
+        self.theme_btn = W.LeverSwitch("LIGHT", "DARK")
+        self.theme_btn.setFixedSize(140, 64)
+        self.theme_btn.setChecked(self.theme_name == "dark")
+        self.theme_btn.setToolTip("Light / dark")
         self.theme_btn.clicked.connect(self.toggle_theme)
-        tl.addWidget(self.theme_btn, 0, Qt.AlignVCenter)
-        self.menu_btn = QToolButton()
-        self.menu_btn.setText("Menu")
-        self.menu_btn.setPopupMode(QToolButton.InstantPopup)
-        self.menu_btn.setMinimumHeight(32)
-        self.menu_btn.setStyleSheet("padding: 4px 12px;")
-        self.menu_btn.setFocusPolicy(Qt.NoFocus)
-        self.menu_btn.setMenu(self._build_menu())
-        tl.addWidget(self.menu_btn, 0, Qt.AlignVCenter)
-        v.addWidget(top)
+        top.addWidget(self.theme_btn)
+        self.menu_btn = W.HwButton("", "icon", icon="menu", min_h=64)
+        self.menu_btn.setToolTip("Menu")
+        self._menu = self._build_menu()
+        self.menu_btn.clicked.connect(lambda: self._menu.exec(
+            self.menu_btn.mapToGlobal(self.menu_btn.rect().bottomRight())
+            - QPoint(self._menu.sizeHint().width(), -4)))
+        top.addWidget(self.menu_btn)
+        v.addLayout(top)
 
         self.stack = QStackedWidget()
         self.load_page = LoadPage(self)
@@ -190,6 +188,11 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(p)
         v.addWidget(self.stack, 1)
         self.setCentralWidget(central)
+        self.chassis = central
+        self.load_page.install_wires(central)
+        self._status_timer = QTimer(self)
+        self._status_timer.setSingleShot(True)
+        self._status_timer.timeout.connect(self._show_tempo)
 
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
@@ -253,7 +256,18 @@ class MainWindow(QMainWindow):
         self.settings.setValue("base_dir", d)
 
     def status(self, msg):
-        self.status_lbl.setText(msg)
+        if not msg:
+            if not self.busy:
+                self._show_tempo()
+            return
+        self.lcd.set("BUSY" if self.busy else "STATUS", msg.upper())
+        self._status_timer.start(1500 if self.busy else 3500)
+
+    def _show_tempo(self):
+        if self.busy:
+            return
+        bpm = self.song.get("bpm") if self.song else None
+        self.lcd.set("SONG TEMPO", f"{bpm:g} BPM" if bpm else "— BPM")
 
     def names_changed(self):
         if hasattr(self, "review_page"):
@@ -261,51 +275,77 @@ class MainWindow(QMainWindow):
             self.session_changed()
 
     def update_steps(self):
-        self.step_btns[1].setEnabled(bool(self.chops) or bool(self.stems))
-        self.step_btns[2].setEnabled(bool(self.export_page.folder) if hasattr(self, "export_page")
-                                     else False)
+        self.steps_sel.set_enabled(1, bool(self.chops) or bool(self.stems))
+        self.steps_sel.set_enabled(2, bool(self.export_page.folder) if hasattr(self, "export_page")
+                                   else False)
 
     def go(self, i):
         self.stack.setCurrentIndex(i)
-        self.step_btns[i].setChecked(True)
+        self.steps_sel.set_current(i)
+        self.chassis.update()
         if i == 1:
             self.review_page.counts_changed()
             self.review_page.setFocus()
 
     # -------------------------------------------------------------- theme
     def apply_theme(self):
-        app = QApplication.instance()
-        app.setPalette(theme.palette(self.t))
-        app.setStyleSheet(theme.stylesheet(self.t))
-        dark = self.theme_name == "dark"
-        self.theme_btn.setText("Light mode" if dark else "Dark mode")
-        self.theme_btn.setIcon(icons.sun(self.t["text"]) if dark else icons.moon(self.t["text"]))
+        skin.apply(self.theme_name)
+        self.t = theme.DARK if self.theme_name == "dark" else theme.LIGHT
         if hasattr(self, "review_page"):
             self.review_page.retheme()
             self.load_page.refresh()
-            self.export_page.icon.setPixmap(icons.check(self.t["ok"]).pixmap(34, 34))
-        self._dark_title_bar(dark)
+            self.load_page.refresh_queue()
+        self._style_title_bar()
 
-    def _dark_title_bar(self, dark):
+    def _style_title_bar(self):
+        """Windows 11: color the native title bar to match the chassis."""
         try:
             import ctypes
             import sys
             if sys.platform != "win32":
                 return
             hwnd = int(self.winId())
+            dark = self.theme_name == "dark"
             val = ctypes.c_int(1 if dark else 0)
             for attr in (20, 19):   # DWMWA_USE_IMMERSIVE_DARK_MODE (new / old builds)
                 if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(val),
                                                               ctypes.sizeof(val)) == 0:
                     break
+
+            def colorref(hexs):
+                c = QColor(hexs)
+                return ctypes.c_uint(c.red() | (c.green() << 8) | (c.blue() << 16))
+            P = K.pal()
+            for attr, col in ((35, P["chassis"] if not dark else "#1E1F21"),       # caption
+                              (36, P["chassis_text"]),                              # caption text
+                              (34, P["chassis_lo"])):                               # border
+                v = colorref(col)
+                ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v),
+                                                           ctypes.sizeof(v))
         except Exception:
             pass
 
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        narrow = self.width() < 1330
+        short = self.height() < 830
+        if getattr(self, "_compact", None) != (narrow, short):
+            self._compact = (narrow, short)
+            self.brand_lbl.setFont(K.font(24 if narrow else 31, 700, 3.5 if narrow else 5.5))
+            self.version_badge.setVisible(not narrow)
+            self.lcd.setMinimumWidth(150 if narrow else 230)
+            self.load_page.set_compact(narrow, short)
+            self.review_page.set_compact(narrow, short)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._style_title_bar()
+
     def toggle_theme(self):
-        self.theme_name = "light" if self.theme_name == "dark" else "dark"
-        self.t = theme.DARK if self.theme_name == "dark" else theme.LIGHT
+        self.theme_name = "dark" if self.theme_btn.isChecked() else "light"
         self.settings.setValue("theme", self.theme_name)
         self.apply_theme()
+        self.update()
 
     # --------------------------------------------------------------- jobs
     def _run(self, job: Job, on_done, msg):
@@ -332,7 +372,7 @@ class MainWindow(QMainWindow):
         self.status("")
         if job in self.jobs:
             self.jobs.remove(job)
-        QMessageBox.warning(self, APP_NAME, "Something went wrong:\n\n" + err.strip().splitlines()[-1])
+        dialogs.warn(self, "Something went wrong:\n\n" + err.strip().splitlines()[-1], "Error")
 
     # ---------------------------------------------------------- undo / redo
     def undo(self):
@@ -452,8 +492,8 @@ class MainWindow(QMainWindow):
         if self.busy:
             return
         if not self.load_page.artist.text().strip() or not self.load_page.song.text().strip():
-            QMessageBox.information(self, APP_NAME, "Enter the artist and song first. They name "
-                                    "the output folder and every file.")
+            dialogs.inform(self, "Enter the artist and song first. They name the output folder "
+                           "and every file.", "Song details")
             return
         self._run(Job(process, self.stems), self._processed, "Chopping…")
 
@@ -465,8 +505,7 @@ class MainWindow(QMainWindow):
         kept = [c for c in self.chops if c.stem_id in manual_ids]
         order = {s.id: i for i, s in enumerate(self.stems)}
         self.chops = sorted(kept + chops, key=lambda c: (order.get(c.stem_id, 0), c.start))
-        if song:
-            self.status(f"Song tempo: {song['bpm']:g} BPM")
+        self._show_tempo()
         self.load_page.refresh()
         self.review_page.rebuild()
         self.session_changed()
@@ -521,10 +560,9 @@ class MainWindow(QMainWindow):
         if not self.queue or self.busy:
             return
         if self.chops and not self._finished:
-            r = QMessageBox.question(self, APP_NAME, "Switch songs? This song's chops haven't "
-                                     "been exported yet. Use Menu › Save session as… first if "
-                                     "you want to keep them.")
-            if r != QMessageBox.Yes:
+            if not dialogs.ask(self, "Switch songs? This song's chops haven't been exported yet. "
+                               "Use Menu › Save session as… first if you want to keep them.",
+                               "Switch song", "Cancel", "Next song"):
                 return
         item = self.queue.pop(index)
         self._reset()
@@ -570,9 +608,8 @@ class MainWindow(QMainWindow):
             return
         if data.get("finished") or (not data.get("stems") and not data.get("queue")):
             return
-        r = QMessageBox.question(self, APP_NAME, "Pick up where you left off?\n\n"
-                                 + session.describe(data))
-        if r == QMessageBox.Yes:
+        if dialogs.ask(self, "Pick up where you left off?\n\n" + session.describe(data),
+                       "Resume", "Start fresh", "Resume session"):
             self.open_session_data(data)
         else:
             data["finished"] = True
@@ -583,9 +620,8 @@ class MainWindow(QMainWindow):
 
     def new_session(self):
         if self.chops and not self._finished:
-            r = QMessageBox.question(self, APP_NAME, "Start a new session? Unexported chops "
-                                     "will be cleared (Save session as… keeps them).")
-            if r != QMessageBox.Yes:
+            if not dialogs.ask(self, "Start a new session? Unexported chops will be cleared "
+                               "(Save session as… keeps them).", "Start new", "Cancel", "New session"):
                 return
         self.queue = []
         self.start_over()
@@ -598,7 +634,7 @@ class MainWindow(QMainWindow):
         try:
             data = session.read(path)
         except Exception as e:
-            QMessageBox.warning(self, APP_NAME, f"Couldn't open that file:\n\n{e}")
+            dialogs.warn(self, f"Couldn't open that file:\n\n{e}")
             return
         self.open_session_data(data)
 
@@ -625,7 +661,7 @@ class MainWindow(QMainWindow):
             self.update_steps()
             self.go(1 if chops else 0)
             if missing:
-                QMessageBox.warning(self, APP_NAME, "Some audio files couldn't be found (moved "
+                dialogs.warn(self, "Some audio files couldn't be found (moved "
                                     "or renamed?), so their chops were skipped:\n\n"
                                     + "\n".join(missing[:12]))
             self.session_changed()
@@ -646,13 +682,13 @@ class MainWindow(QMainWindow):
             session.save(path, session.to_dict(self._meta(), self.stems, self.chops, self.queue))
             self.status(f"Saved {os.path.basename(path)}")
         except Exception as e:
-            QMessageBox.warning(self, APP_NAME, f"Couldn't save the session:\n\n{e}")
+            dialogs.warn(self, f"Couldn't save the session:\n\n{e}")
 
     # ------------------------------------------------------------ updates
     def check_updates(self, quiet=True):
         if not updater.is_frozen():
             if not quiet:
-                QMessageBox.information(self, APP_NAME, "Updates work in the downloaded "
+                dialogs.inform(self, "Updates work in the downloaded "
                                         "MultiCrack.exe.")
             return
         th = UpdateCheck(self)
@@ -666,15 +702,14 @@ class MainWindow(QMainWindow):
                 if not quiet:
                     self.install_update()
             elif not quiet:
-                QMessageBox.information(self, APP_NAME, f"You're on the latest version "
+                dialogs.inform(self, f"You're on the latest version "
                                         f"({updater.current_version()}).")
 
         def failed(msg):
             if not quiet:
-                r = QMessageBox.question(self, APP_NAME, "Couldn't check for updates. The "
-                                         "GitHub project needs to be public for this to work.\n\n"
-                                         "Open the download page instead?")
-                if r == QMessageBox.Yes:
+                if dialogs.ask(self, "Couldn't check for updates. The GitHub project needs to be "
+                               "public for this to work.\n\nOpen the download page instead?",
+                               "Updates", "Open page", "Close"):
                     QDesktopServices.openUrl(QUrl(updater.RELEASES_PAGE))
 
         th.found.connect(found)
@@ -685,9 +720,9 @@ class MainWindow(QMainWindow):
         info = self._update
         if not info or self.busy:
             return
-        r = QMessageBox.question(self, APP_NAME, f"Update MultiCrack to {info['version']}?\n\n"
-                                 "It downloads, restarts, and offers to pick up where you left off.")
-        if r != QMessageBox.Yes:
+        if not dialogs.ask(self, f"Update MultiCrack to {info['version']}?\n\nIt downloads, "
+                           "restarts, and offers to pick up where you left off.", "Update",
+                           "Update now", "Later"):
             return
         self.autosave()
 
@@ -697,16 +732,16 @@ class MainWindow(QMainWindow):
                 updater.install_and_restart(path)
                 QApplication.instance().quit()
             except Exception as e:
-                QMessageBox.warning(self, APP_NAME, f"Couldn't install the update ({e}). "
+                dialogs.warn(self, f"Couldn't install the update ({e}). "
                                     "Opening the download page instead.")
                 QDesktopServices.openUrl(QUrl(updater.RELEASES_PAGE))
         self._run(Job(lambda progress=None: updater.download(info["url"], progress)), done,
                   "Downloading update…")
 
     def about(self):
-        QMessageBox.about(self, APP_NAME, f"<b>{APP_NAME} {updater.current_version()}</b><br><br>"
-                          "Chops stems and multitracks into clean, labeled samples.<br><br>"
-                          "Sound recognition: CED-mini model (Apache 2.0) via sherpa-onnx.")
+        dialogs.inform(self, f"MultiCrack {updater.current_version()}\n\nChops stems and "
+                       "multitracks into clean, labeled samples.\n\nSound recognition: CED-mini "
+                       "model (Apache 2.0) via sherpa-onnx. Font: IBM Plex Mono (OFL).", "About")
 
     def closeEvent(self, e):
         self.player.stop()

@@ -1,147 +1,250 @@
-"""Loop & section options for drum / percussion stems."""
+"""Loop & section options for drum / percussion stems (hardware skin)."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QGridLayout,
-                               QHBoxLayout, QPushButton, QVBoxLayout, QWidget)
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtWidgets import (QAbstractItemView, QAbstractSpinBox, QButtonGroup, QCheckBox,
+                               QDoubleSpinBox, QFrame, QHBoxLayout, QHeaderView, QLineEdit,
+                               QRadioButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from ..core.naming import chop_key
-from .common import Segmented, fmt_time, hline, label, panel
-from .theme import WAVE
-from .waveform import StemView
+from .common import fmt_time
+from .skin import core as K
+from .skin import widgets as W
+from .skin.dialogs import HwDialog
+from .waveform import WAVE, StemView
 
 
-class LoopDialog(QDialog):
+def _field(caption, widget):
+    box = QVBoxLayout()
+    box.setSpacing(6)
+    box.addWidget(W.cap(caption, "on_dark", 11.5, 600, 1.6))
+    box.addWidget(widget)
+    return box
+
+
+class SpanCard(QFrame):
+    def __init__(self, color, name, where, hits):
+        super().__init__()
+        self.color = color
+        self.setMinimumHeight(64)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 8, 14, 8)
+        lay.setSpacing(4)
+        top = W.mono(name, "on_dark", 13, 600, 0.5)
+        top.setStyleSheet(f"color: {QColor(color).lighter(150).name()}; background: transparent;")
+        top.setProperty("skincolor", None)
+        lay.addWidget(top)
+        row = QHBoxLayout()
+        row.addWidget(W.mono(where, "on_dark", 13, 500, 0.3))
+        row.addStretch(1)
+        row.addWidget(W.cap(f"{hits} hits", "on_dark_muted", 11.5, 600, 1.2))
+        lay.addLayout(row)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        c = QColor(self.color)
+        fill = QColor(c)
+        fill.setAlpha(46)
+        p.setBrush(fill)
+        p.setPen(QPen(c.lighter(115), 1.3))
+        p.drawRoundedRect(r, 4, 4)
+
+
+class LoopDialog(HwDialog):
     def __init__(self, win, stem):
-        super().__init__(win)
+        super().__init__(win, "Loop options", (1100, 880))
         self.win, self.stem = win, stem
-        self.setWindowTitle(f"Loop options · {stem.name}")
-        self.resize(1080, 720)
         opts = stem.options
         sec = stem.analysis.get("sections") or {}
         grid = stem.analysis.get("grid") or {}
+        body = self.body
+        body.setSpacing(14)
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 14, 16, 14)
-        lay.setSpacing(12)
-
-        head = QHBoxLayout()
-        head.addWidget(label(stem.name, "h2"))
-        head.addWidget(label(f"AI detected: {stem.kind}", "muted"))
-        head.addStretch(1)
-        head.addWidget(label("Tempo"))
+        # ---- stem / ai / tempo
+        top = QHBoxLayout()
+        top.setSpacing(18)
+        name = QLineEdit(stem.name)
+        name.setReadOnly(True)
+        name.setFocusPolicy(Qt.NoFocus)
+        kind = QLineEdit(stem.kind)
+        kind.setReadOnly(True)
+        kind.setFocusPolicy(Qt.NoFocus)
         self.bpm = QDoubleSpinBox()
         self.bpm.setRange(40, 250)
         self.bpm.setDecimals(2)
         self.bpm.setSuffix(" BPM")
+        self.bpm.setButtonSymbols(QAbstractSpinBox.NoButtons)
         self.bpm.setValue(float(opts.get("bpm") or sec.get("bpm") or grid.get("bpm") or 120))
-        head.addWidget(self.bpm)
-        lay.addLayout(head)
+        self.bpm.setToolTip("The song tempo. Change it only if the loops land off the beat.")
+        self.bpm.setFocusPolicy(Qt.ClickFocus)
+        top.addLayout(_field("Stem", name), 3)
+        top.addLayout(_field("AI detected", kind), 3)
+        top.addLayout(_field("Tempo", self.bpm), 2)
+        body.addLayout(top)
 
-        row = QHBoxLayout()
-        row.addWidget(label("Loop length"))
-        self.bars = Segmented(["2 bars", "4 bars", "8 bars", "16 bars"],
-                              f"{int(opts.get('bars', 4))} bars")
-        row.addWidget(self.bars)
-        row.addWidget(label("Cuts land exactly on bar lines. Tempo is locked for the whole song.",
-                            "muted"))
-        row.addStretch(1)
-        lay.addLayout(row)
+        # ---- loop length
+        lg = W.GroupFrame("Loop length", layout="h", margins=(18, 24, 18, 14))
+        lg.lay.setSpacing(18)
+        self.bar_group = QButtonGroup(self)
+        cur = int(opts.get("bars", 4))
+        for n in (2, 4, 8, 16):
+            b = W.HwButton(f"{n} bars", "seg", checkable=True, min_h=44, px=14)
+            b.setChecked(n == cur)
+            self.bar_group.addButton(b, n)
+            lg.lay.addWidget(b, 1)
+        self.bar_group.setExclusive(True)
+        body.addWidget(lg)
 
-        vp, vl = panel(spacing=6, margins=(10, 10, 10, 8))
+        # ---- overview
+        ov = W.GroupFrame("", margins=(14, 18, 14, 10))
         self.view = StemView(editable=False)
-        self.view.setMinimumHeight(170)
+        self.view.setMinimumHeight(190)
         self.view.set_stem(win.peaks(stem), stem.frames, stem.sr)
-        bands, regions = [], []
+        bands, regions, labels = [], [], []
         bpm = float(sec.get("bpm") or 120)
         bar = 240.0 * stem.sr / bpm
         d0 = float(grid.get("downbeat", 0)) % bar if grid else 0.0
-        for i, g in enumerate(sec.get("grooves", [])):
+        grooves = sec.get("grooves", [])
+        for i, g in enumerate(grooves):
             color = WAVE["groove"][i % len(WAVE["groove"])]
             for part in g["where"].split(", "):
                 try:
                     a, b = part.replace("bars ", "").split("–")
-                    bands.append(dict(start=d0 + (int(a) - 1) * bar, end=d0 + int(b) * bar,
-                                      color=color, name=g["name"]))
+                    s0, s1 = d0 + (int(a) - 1) * bar, d0 + int(b) * bar
+                    bands.append(dict(start=s0, end=s1, color=color, name=g["name"]))
+                    labels.append((s0, a))
+                    labels.append((s1, b))
                 except ValueError:
                     pass
-            regions.append(dict(start=g["start"], end=g["end"], style="loop",
+            regions.append(dict(start=g["start"], end=g["end"], style="loop", color=color,
                                 tag=g["name"].split()[-1]))
-        for c in win.chops:
-            if c.stem_id == stem.id and c.kind == "roll":
-                regions.append(dict(start=c.start, end=c.end, style="roll", tag="R"))
         self.view.bands = bands
+        self.view.bar_labels = labels
+        self.view.ticks = [c.start for c in win.chops
+                           if c.stem_id == stem.id and c.kind in ("roll", "hit")]
         self.view.set_regions(regions)
-        vl.addWidget(self.view)
-        vl.addWidget(label(f"Coloured strips: grooves the AI found. Blue boxes: the loop it "
-                           f"picked from each groove. Yellow: rolls. Scroll to zoom.", "muted"))
-        lay.addWidget(vp)
+        ov.lay.addWidget(self.view)
+        body.addWidget(ov, 3)
 
-        tp, tl = panel(spacing=0, margins=(0, 0, 0, 0))
-        g = QGridLayout()
-        g.setContentsMargins(14, 10, 14, 10)
-        g.setHorizontalSpacing(18)
-        g.setVerticalSpacing(10)
-        for c, h in enumerate(["Section (AI)", "Where", "Loop file", "Loop", "Chop into hits"]):
-            g.addWidget(label(h, "muted"), 0, c)
+        # ---- selected loop spans
+        if grooves:
+            sp = W.GroupFrame("Selected loop spans", layout="h", margins=(16, 24, 16, 14))
+            sp.lay.setSpacing(14)
+            for i, g in enumerate(grooves):
+                where = "Bars " + ", ".join(p.replace("bars ", "") for p in g["where"].split(", "))
+                sp.lay.addWidget(SpanCard(WAVE["groove"][i % len(WAVE["groove"])], g["name"],
+                                          where, g["hits"]), 1)
+            body.addWidget(sp)
+
+        # ---- loop settings table
+        st_g = W.GroupFrame("Loop settings", margins=(10, 22, 10, 8))
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(["SECTION", "WHERE", "LOOP FILE NAME", "INCLUDE",
+                                              "ALSO CHOP"])
+        hh = self.table.horizontalHeader()
+        for c, w in enumerate((170, 220, 0, 110, 210)):
+            hh.setSectionResizeMode(c, QHeaderView.Stretch if w == 0 else QHeaderView.Fixed)
+            if w:
+                self.table.setColumnWidth(c, w)
+        hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        hh.setFont(K.font(11, 600, 1.4))
+        hh.setFixedHeight(34)
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(42)
+        self.table.setShowGrid(False)
+        self.table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.table.setFocusPolicy(Qt.NoFocus)
+        self.table.setFont(K.font(13, 400, 0.3))
         self.groove_boxes = {}
-        r = 1
         gopts = opts.setdefault("grooves", {})
-        for gr in sec.get("grooves", []):
+        self.table.setRowCount(max(1, len(grooves)))
+        for r, gr in enumerate(grooves):
             go = gopts.setdefault(gr["name"], {"loop": True, "chop": True})
-            g.addWidget(label(gr["name"]), r, 0)
-            g.addWidget(label(gr["where"] + f"  ·  starts {fmt_time(gr['start'], stem.sr)}",
-                              "muted", wrap=True), r, 1)
+            cell = QWidget()
+            cl = QHBoxLayout(cell)
+            cl.setContentsMargins(8, 0, 4, 0)
+            cl.setSpacing(10)
+            cl.addWidget(W.Swatch(WAVE["groove"][r % len(WAVE["groove"])]))
+            cl.addWidget(W.mono(gr["name"], "on_dark", 13, 500, 0.3))
+            cl.addStretch(1)
+            self.table.setCellWidget(r, 0, cell)
+            where = "Bars " + ", ".join(p.replace("bars ", "") for p in gr["where"].split(", "))
+            it = QTableWidgetItem(where)
+            it.setToolTip(where + f"  ·  starts {fmt_time(gr['start'], stem.sr)}")
+            self.table.setItem(r, 1, it)
             fname = chop_key(gr["label"], gr["bars"])
             note = "  (section is shorter)" if gr.get("short") else ""
-            g.addWidget(label(f"{win.prefix()}{fname}_##{note}", "mono"), r, 2)
-            lb = QCheckBox("Include")
+            self.table.setItem(r, 2, QTableWidgetItem(f"{win.prefix()}{fname}_##.wav{note}"))
+            lb = QCheckBox()
             lb.setChecked(go["loop"])
             cb = QCheckBox(f"Also chop ({gr['hits']} hits)")
             cb.setChecked(go["chop"])
-            g.addWidget(lb, r, 3)
-            g.addWidget(cb, r, 4)
+            self.table.setCellWidget(r, 3, self._pad(lb))
+            self.table.setCellWidget(r, 4, self._pad(cb))
             self.groove_boxes[gr["name"]] = (lb, cb)
-            r += 1
-        if not sec.get("grooves"):
-            g.addWidget(label("No repeating groove found in this file. Rolls and single hits "
-                              "are still chopped.", "muted", wrap=True), r, 0, 1, 5)
-            r += 1
-        g.addWidget(hline(), r, 0, 1, 5)
-        r += 1
-        g.addWidget(label("Rolls / fills"), r, 0)
-        g.addWidget(label(f"{sec.get('rolls', 0)} found, up to 6 distinct kept · not loopable",
-                          "muted"), r, 1, 1, 2)
-        self.roll_mode = QComboBox()
-        self.roll_mode.addItems(["One-shot", "Loop", "Skip"])
-        self.roll_mode.setCurrentText(opts.get("roll_mode", "One-shot"))
-        g.addWidget(self.roll_mode, r, 3, 1, 2)
-        r += 1
-        g.addWidget(label("Single hits"), r, 0)
-        g.addWidget(label(f"{sec.get('hits', 0)} outside the grooves", "muted"), r, 1, 1, 2)
+        if not grooves:
+            self.table.setSpan(0, 0, 1, 5)
+            msg = W.mono("No repeating groove found in this file. Rolls and single hits are still "
+                         "chopped.", "on_dark_muted", 13, 400, 0.3)
+            self.table.setCellWidget(0, 0, self._pad(msg))
+        self.table.setFixedHeight(34 + 42 * max(1, len(grooves)) + 4)
+        st_g.lay.addWidget(self.table)
+        body.addWidget(st_g)
+
+        # ---- rolls / single hits
+        bottom = QHBoxLayout()
+        bottom.setSpacing(16)
+        rg = W.GroupFrame("Rolls / fills", layout="h", margins=(18, 24, 18, 12))
+        rg.lay.setSpacing(28)
+        self.roll_group = QButtonGroup(self)
+        mode = opts.get("roll_mode", "One-shot")
+        for i, text in enumerate(("One-shot", "Loop", "Skip")):
+            rb = QRadioButton(text)
+            rb.setChecked(text == mode)
+            self.roll_group.addButton(rb, i)
+            rg.lay.addWidget(rb)
+        rg.lay.addStretch(1)
+        rg.lay.addWidget(W.cap(f"{sec.get('rolls', 0)} found · up to 6 kept", "on_dark_muted",
+                               11, 500, 1.2))
+        bottom.addWidget(rg, 3)
+        hg = W.GroupFrame("Single hits", layout="h", margins=(18, 24, 18, 12))
         self.hits = QCheckBox("Include")
         self.hits.setChecked(opts.get("include_hits", True))
-        g.addWidget(self.hits, r, 3, 1, 2)
-        g.setRowStretch(r + 1, 1)
-        g.setColumnStretch(1, 1)
-        holder = QWidget()
-        holder.setLayout(g)
-        tl.addWidget(holder)
-        lay.addWidget(tp)
-        lay.addStretch(1)
+        hg.lay.addWidget(self.hits)
+        hg.lay.addStretch(1)
+        hg.lay.addWidget(W.cap(f"{sec.get('hits', 0)} outside the grooves", "on_dark_muted",
+                               11, 500, 1.2))
+        bottom.addWidget(hg, 2)
+        body.addLayout(bottom)
 
-        bottom = QHBoxLayout()
-        bottom.addWidget(label("Hits from loops and single hits are pooled: up to 3 of each sound. "
-                               "Anything the AI can't name confidently is called Perc.", "muted",
-                               wrap=True), 1)
-        cancel = QPushButton("Cancel")
+        # ---- buttons
+        btns = QHBoxLayout()
+        note = W.cap("Hits are pooled: up to 3 of each sound. Anything the AI can't name is "
+                     "called Perc.", "on_dark_muted", 11, 500, 1.0)
+        note.setWordWrap(True)
+        btns.addWidget(note, 1)
+        cancel = W.HwButton("Cancel", "dark", min_h=44)
+        cancel.setMinimumWidth(170)
         cancel.clicked.connect(self.reject)
-        bottom.addWidget(cancel)
-        apply = QPushButton("Apply and send to Review")
-        apply.setObjectName("primary")
+        apply = W.HwButton("Apply and send to review", "red", min_h=44)
+        apply.setMinimumWidth(300)
         apply.clicked.connect(self.apply)
-        bottom.addWidget(apply)
-        lay.addLayout(bottom)
+        btns.addWidget(cancel)
+        btns.addSpacing(10)
+        btns.addWidget(apply)
+        body.addLayout(btns)
+
+    @staticmethod
+    def _pad(w):
+        holder = QWidget()
+        lay = QHBoxLayout(holder)
+        lay.setContentsMargins(8, 0, 4, 0)
+        lay.addWidget(w)
+        lay.addStretch(1)
+        return holder
 
     def apply(self):
         st = self.stem
@@ -149,8 +252,8 @@ class LoopDialog(QDialog):
         grid = st.analysis.get("grid") or {}
         bpm = round(self.bpm.value(), 2)
         opts["bpm"] = None if grid and abs(bpm - float(grid.get("bpm", 0))) < 0.005 else bpm
-        opts["bars"] = int(self.bars.value.split()[0])
-        opts["roll_mode"] = self.roll_mode.currentText()
+        opts["bars"] = int(self.bar_group.checkedId()) if self.bar_group.checkedId() > 0 else 4
+        opts["roll_mode"] = ("One-shot", "Loop", "Skip")[max(0, self.roll_group.checkedId())]
         opts["include_hits"] = self.hits.isChecked()
         for name, (lb, cb) in self.groove_boxes.items():
             opts["grooves"][name] = {"loop": lb.isChecked(), "chop": cb.isChecked()}
