@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QHBoxLayou
 
 from ..core.audio import render_chop
 from ..core.model import Chop
-from .common import fmt_time, label, label_combo, panel, snap_to_sound, trim_tail
+from .common import (fmt_time, label, label_combo, magnet_to_hit, panel, snap_to_sound,
+                     trim_tail)
 from .waveform import StemView
 
 DEFAULT_LABEL = {"vocal": "Vocal Chop", "guitar": "Guitar Stab", "fx": "FX", "synth": "Synth Stab",
@@ -68,6 +69,7 @@ class ManualDialog(QDialog):
         self.view.setMinimumHeight(220)
         self.view.set_stem(win.peaks(stem), stem.frames, stem.sr)
         self.view.snap = lambda s: snap_to_sound(stem, s) if self.snap.isChecked() else s
+        self.view.snap_edge = lambda s: magnet_to_hit(stem, s) if self.snap.isChecked() else s
         self.view.regionAdded.connect(self.add_region)
         self.view.regionChanged.connect(self.region_changed)
         self.view.regionSelected.connect(self.select_row)

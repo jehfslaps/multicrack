@@ -3,13 +3,13 @@ from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton,
+from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton,
                                QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
 from ..core.audio import render_chop
 from ..core.naming import assign_names
 from . import icons
-from .common import fmt_len, label, label_combo, panel, snap_to_sound
+from .common import fmt_len, label, label_combo, magnet_to_hit, panel
 from .waveform import MiniWave, TrimEditor
 
 
@@ -152,7 +152,8 @@ class ReviewPage(QWidget):
         self.ed_name.setFont(f)
         head.addWidget(self.ed_name)
         head.addStretch(1)
-        head.addWidget(label("Drag the blue handles to trim. The start snaps to the hit.", "muted"))
+        head.addWidget(label("Drag the blue handles to trim. Scroll on the waveform to zoom.",
+                             "muted"))
         el.addLayout(head)
         self.editor = TrimEditor()
         self.editor.changed.connect(self._trimmed)
@@ -167,6 +168,14 @@ class ReviewPage(QWidget):
         self.ed_reset = QPushButton("Reset trim")
         self.ed_reset.clicked.connect(self.reset_trim)
         er.addWidget(self.ed_reset)
+        self.ed_snap = QCheckBox("Snap start to the hit")
+        self.ed_snap.setToolTip("When on, a start dropped within about 12 ms of a hit lines up "
+                                "with its attack. Turn off for completely free trimming.")
+        self.ed_snap.setChecked(self.win.settings.value("snap_trim", "true") == "true")
+        self.ed_snap.toggled.connect(
+            lambda on: self.win.settings.setValue("snap_trim", "true" if on else "false"))
+        er.addSpacing(8)
+        er.addWidget(self.ed_snap)
         self.ed_flag = label("", "warn", wrap=True)
         er.addWidget(self.ed_flag, 1)
         el.addLayout(er)
@@ -281,10 +290,16 @@ class ReviewPage(QWidget):
             self._orig[chop.id] = (chop.start, chop.end)
         self.ed_name.setText(self.names.get(chop.id, ""))
         self.ed_flag.setText(chop.flag)
-        snap = (lambda s, st=st: snap_to_sound(st, s)) if chop.kind in ("hit", "roll", "event", "region") else None
-        self.editor.set_chop(self.win.peaks(st), st.frames, st.sr, chop.start, chop.end, snap)
+        self._load_editor(chop, st)
         if play:
             self.play_selected()
+
+    def _load_editor(self, chop, st):
+        def snap(s, st=st, chop=chop):
+            if not self.ed_snap.isChecked() or chop.kind == "loop":
+                return s           # loops stay where you put them (bar lines are yours to move)
+            return magnet_to_hit(st, s)
+        self.editor.set_chop(self.win.peaks(st), st.frames, st.sr, chop.start, chop.end, snap)
 
     def play_selected(self):
         c = self.selected
@@ -303,6 +318,9 @@ class ReviewPage(QWidget):
         row = self.rows.get(c.id)
         if row:
             row.update_view()
+        st = self.win.stem_by_id(c.stem_id)
+        if s <= self.editor.view_a + int(0.02 * st.sr) or e >= self.editor.view_b - int(0.02 * st.sr):
+            self._load_editor(c, st)   # handle reached the edge: re-frame so you can keep going
         self.play_selected()
 
     def reset_trim(self):

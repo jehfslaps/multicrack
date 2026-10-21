@@ -185,6 +185,19 @@ class TrimEditor(QWidget):
         p.drawText(QRectF(8, r.height() - 20, 200, 18), Qt.AlignLeft | Qt.AlignVCenter,
                    f"{dur:.3f} s")
 
+    def wheelEvent(self, e):
+        """Zoom around the mouse so trims can be made precisely."""
+        if self.cache is None:
+            return
+        span = self.view_b - self.view_a
+        center = self._s(e.position().x())
+        factor = 0.8 if e.angleDelta().y() > 0 else 1.25
+        new = int(min(self.n, max(int(0.01 * self.sr), span * factor)))
+        a = int(center - (center - self.view_a) * new / max(1, span))
+        a = max(0, min(self.n - new, a))
+        self.view_a, self.view_b = a, a + new
+        self.update()
+
     def mousePressEvent(self, e):
         if self.cache is None:
             return
@@ -239,7 +252,8 @@ class StemView(QWidget):
         self.bands: list[dict] = []      # coloured section strips (start, end, color, name)
         self.selected = -1
         self._drag = None
-        self.snap = None
+        self.snap = None        # for newly drawn regions
+        self.snap_edge = None   # for dragged region edges (gentle)
         self.strip = 22
 
     def set_stem(self, cache: PeakCache, n: int, sr: int):
@@ -410,7 +424,7 @@ class StemView(QWidget):
         else:
             _k, i, part = d
             reg = self.regions[i]
-            if part == "start" and self.snap:
-                reg["start"] = int(self.snap(reg["start"]))
+            if part == "start" and self.snap_edge:
+                reg["start"] = int(self.snap_edge(reg["start"]))
             self.regionChanged.emit(i, reg["start"], reg["end"])
         self.update()

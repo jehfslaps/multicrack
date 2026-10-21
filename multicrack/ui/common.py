@@ -86,8 +86,24 @@ class Segmented(QWidget):
             self.on_change(o)
 
 
+MAGNET_S = 0.012
+
+
+def magnet_to_hit(stem, s: int) -> int:
+    """Gentle snap for a dragged start handle: only pulls the point onto a hit's attack when it
+    was dropped within ~12 ms of it. Anywhere else the point stays exactly where it was put."""
+    an = engines.get_analysis(stem)
+    onsets = engines.get_onsets(stem, an)
+    if len(onsets) == 0:
+        return s
+    k = int(np.searchsorted(onsets, s))
+    near = [int(onsets[i]) for i in (k - 1, k) if 0 <= i < len(onsets)]
+    best = min(near, key=lambda o: abs(o - s))
+    return best if abs(best - s) <= int(MAGNET_S * an.sr) else s
+
+
 def snap_to_sound(stem, s: int) -> int:
-    """Move a start point to just before the sound actually begins."""
+    """For a newly drawn region: move its start to just before the sound actually begins."""
     an = engines.get_analysis(stem)
     sr = an.sr
     a = max(0, s - int(0.05 * sr))
