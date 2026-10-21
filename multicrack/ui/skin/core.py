@@ -1,4 +1,4 @@
-"""MultiCrack hardware skin: palettes, fonts, generated metal textures and the drawing kit.
+"""Xenakis hardware skin: palettes, fonts, generated metal textures and the drawing kit.
 
 Everything is painted in code (no bitmap assets besides the font), so it stays sharp at any
 Windows scaling. Textures are generated once with numpy and tiled."""

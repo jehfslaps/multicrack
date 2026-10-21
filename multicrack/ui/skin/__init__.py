@@ -1,4 +1,4 @@
-"""MultiCrack hardware skin."""
+"""Xenakis hardware skin."""
 from PySide6.QtWidgets import QApplication
 
 from . import core

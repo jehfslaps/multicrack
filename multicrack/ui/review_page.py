@@ -18,7 +18,7 @@ from .skin import core as K
 from .skin import widgets as W
 from .waveform import MiniWave, TrimEditor
 
-DRAG_DIR = os.path.join(tempfile.gettempdir(), "MultiCrack", "drag")
+DRAG_DIR = os.path.join(tempfile.gettempdir(), "Xenakis", "drag")
 
 # list columns (fixed widths; the waveform column stretches)
 COL_WIDE = dict(grip=18, num=30, play=40, name=292, dur=92, type=164, approve=142, clone=36,
@@ -799,7 +799,7 @@ class ReviewPage(QWidget):
     # -------------------------------------------------------------- drag out
     def start_drag(self, row):
         c, st = row.chop, row.stem
-        name = self.names.get(c.id) or "MultiCrack_sample.wav"
+        name = self.names.get(c.id) or "Xenakis_sample.wav"
         os.makedirs(DRAG_DIR, exist_ok=True)
         path = os.path.join(DRAG_DIR, name)
         try:

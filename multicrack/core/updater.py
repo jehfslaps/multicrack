@@ -14,7 +14,8 @@ from .. import __version__
 REPO = "jehfslaps/multicrack"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
-ASSET = "MultiCrack.exe"
+ASSET = "Xenakis.exe"
+LEGACY_ASSETS = ("MultiCrack.exe",)
 
 
 def current_version() -> str:
@@ -37,13 +38,13 @@ def is_frozen() -> bool:
 def check(timeout=8):
     """Return {'version', 'url', 'notes'} when a newer release exists, else None.
     Raises on network / access problems."""
-    req = urllib.request.Request(API, headers={"User-Agent": "MultiCrack-updater",
+    req = urllib.request.Request(API, headers={"User-Agent": "Xenakis-updater",
                                                "Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         data = json.loads(r.read().decode("utf-8"))
     tag = data.get("tag_name", "")
-    url = next((a.get("browser_download_url") for a in data.get("assets", [])
-                if a.get("name") == ASSET), None)
+    assets = {a.get("name"): a.get("browser_download_url") for a in data.get("assets", [])}
+    url = next((assets[n] for n in (ASSET, *LEGACY_ASSETS) if assets.get(n)), None)
     if not url:
         return None
     if _tuple(tag) > _tuple(current_version()):
@@ -52,10 +53,10 @@ def check(timeout=8):
 
 
 def download(url, progress=None) -> str:
-    dest_dir = os.path.join(tempfile.gettempdir(), "MultiCrack", "update")
+    dest_dir = os.path.join(tempfile.gettempdir(), "Xenakis", "update")
     os.makedirs(dest_dir, exist_ok=True)
     dest = os.path.join(dest_dir, ASSET)
-    req = urllib.request.Request(url, headers={"User-Agent": "MultiCrack-updater"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Xenakis-updater"})
     with urllib.request.urlopen(req, timeout=30) as r, open(dest + ".part", "wb") as f:
         total = int(r.headers.get("Content-Length") or 0)
         got = 0

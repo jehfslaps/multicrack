@@ -1,4 +1,4 @@
-"""The MultiCrack window: holds the session and moves between Load, Review and Export."""
+"""The Xenakis window: holds the session and moves between Load, Review and Export."""
 from __future__ import annotations
 
 import os
@@ -13,11 +13,11 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QFileDialog, QFrame, 
                                QLabel, QMainWindow, QMenu, QMessageBox, QPushButton,
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget)
 
-from .. import APP_NAME
+from .. import APP_NAME, LEGACY_NAME
 from ..core import session, updater
 from ..core.audio import desktop_dir
 from ..core.songs import guess_names, split_songs
-from . import icons, skin, theme
+from . import logo, skin, theme
 from .skin import core as K
 from .skin import dialogs
 from .skin import widgets as W
@@ -113,6 +113,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.settings = QSettings(APP_NAME, APP_NAME)
+        self._migrate_settings()
         self.theme_name = self.settings.value("theme", "light")
         self.t = theme.DARK if self.theme_name == "dark" else theme.LIGHT
         base = self.settings.value("base_dir", "")
@@ -130,11 +131,12 @@ class MainWindow(QMainWindow):
         self.player = Player()
         self.history = History(self)
         data_dir = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation) or os.path.join(
-            os.path.expanduser("~"), ".multicrack")
+            os.path.expanduser("~"), ".xenakis")
         self.autosave_path = os.path.join(data_dir, "autosave" + session.EXT)
+        self._migrate_autosave(data_dir)
 
         self.setWindowTitle(f"{APP_NAME} {updater.current_version()}")
-        self.setWindowIcon(icons.app_icon())
+        self.setWindowIcon(logo.app_icon())
         self.resize(1480, 940)
         self.setMinimumSize(QSize(1040, 700))
 
@@ -148,10 +150,13 @@ class MainWindow(QMainWindow):
         top.setSpacing(14)
         brand = W.Plate(margins=(26, 4, 22, 4))
         brand.setFixedHeight(70)
-        self.brand_lbl = W.mono("MULTICRACK", "plate_text", 31, 700, 5.5)
+        self.brand_mark = W.LogoMark(46)
+        brand.lay.addWidget(self.brand_mark)
+        brand.lay.addSpacing(12)
+        self.brand_lbl = W.mono("XENAKIS", "plate_text", 31, 700, 5.5)
         brand.lay.addWidget(self.brand_lbl)
         brand.lay.addSpacing(6)
-        self.version_badge = W.Badge(f"MC-1  [v{updater.current_version()}]")
+        self.version_badge = W.Badge(f"XK-1  [v{updater.current_version()}]")
         brand.lay.addWidget(self.version_badge)
         top.addWidget(brand)
         self.steps_sel = W.StepSelector(["01 LOAD", "02 REVIEW", "03 EXPORT"])
@@ -216,7 +221,7 @@ class MainWindow(QMainWindow):
                  ("Undo", QKeySequence.Undo, self.undo),
                  ("Redo", QKeySequence("Ctrl+Y"), self.redo), None,
                  ("Check for updates…", None, lambda: self.check_updates(quiet=False)),
-                 ("About MultiCrack", None, self.about)]
+                 (f"About {APP_NAME}", None, self.about)]
         for it in items:
             if it is None:
                 m.addSeparator()
@@ -628,7 +633,8 @@ class MainWindow(QMainWindow):
 
     def open_session(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open session", self.base_dir,
-                                              f"MultiCrack sessions (*{session.EXT})")
+                                              f"{APP_NAME} sessions ("
+                                              + " ".join(f"*{e}" for e in session.OPEN_EXTS) + ")")
         if not path:
             return
         try:
@@ -673,7 +679,7 @@ class MainWindow(QMainWindow):
         name = " - ".join(p for p in (lp.artist.text().strip(), lp.song.text().strip()) if p) or "Session"
         path, _ = QFileDialog.getSaveFileName(self, "Save session",
                                               os.path.join(self.base_dir, name + session.EXT),
-                                              f"MultiCrack sessions (*{session.EXT})")
+                                              f"{APP_NAME} sessions (*{session.EXT})")
         if not path:
             return
         if not path.endswith(session.EXT):
@@ -689,7 +695,7 @@ class MainWindow(QMainWindow):
         if not updater.is_frozen():
             if not quiet:
                 dialogs.inform(self, "Updates work in the downloaded "
-                                        "MultiCrack.exe.")
+                                        "Xenakis.exe.")
             return
         th = UpdateCheck(self)
         self._checks.append(th)
@@ -720,7 +726,7 @@ class MainWindow(QMainWindow):
         info = self._update
         if not info or self.busy:
             return
-        if not dialogs.ask(self, f"Update MultiCrack to {info['version']}?\n\nIt downloads, "
+        if not dialogs.ask(self, f"Update {APP_NAME} to {info['version']}?\n\nIt downloads, "
                            "restarts, and offers to pick up where you left off.", "Update",
                            "Update now", "Later"):
             return
@@ -738,9 +744,37 @@ class MainWindow(QMainWindow):
         self._run(Job(lambda progress=None: updater.download(info["url"], progress)), done,
                   "Downloading update…")
 
+    # ------------------------------------------------------------ carried over from MultiCrack
+    def _migrate_settings(self):
+        """First run after the rename: copy the old app's preferences across."""
+        if self.settings.value("migrated_from_legacy", False, type=bool):
+            return
+        old = QSettings(LEGACY_NAME, LEGACY_NAME)
+        for key in old.allKeys():
+            if not self.settings.contains(key):
+                self.settings.setValue(key, old.value(key))
+        self.settings.setValue("migrated_from_legacy", True)
+        self.settings.sync()
+
+    def _migrate_autosave(self, data_dir):
+        if os.path.exists(self.autosave_path):
+            return
+        head, tail = os.path.split(os.path.normpath(data_dir))
+        if tail != APP_NAME:
+            return
+        old = os.path.join(head, LEGACY_NAME, "autosave.multicrack")
+        if os.path.isfile(old):
+            try:
+                os.makedirs(data_dir, exist_ok=True)
+                shutil.move(old, self.autosave_path)
+            except OSError:
+                pass
+
     def about(self):
-        dialogs.inform(self, f"MultiCrack {updater.current_version()}\n\nChops stems and "
-                       "multitracks into clean, labeled samples.\n\nSound recognition: CED-mini "
+        dialogs.inform(self, f"{APP_NAME} {updater.current_version()}\n\nChops stems and "
+                       "multitracks into clean, labeled samples.\n\nNamed for Iannis Xenakis, who "
+                       "built sound and buildings out of straight lines; the X in the logo is woven "
+                       "the same way.\n\nSound recognition: CED-mini "
                        "model (Apache 2.0) via sherpa-onnx. Font: IBM Plex Mono (OFL).", "About")
 
     def closeEvent(self, e):

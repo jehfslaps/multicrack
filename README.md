@@ -1,17 +1,19 @@
-# MultiCrack
+<img src="assets/Xenakis.png" width="96" align="right" alt="">
+
+# Xenakis
 
 Chop stems and multitracks into clean, labeled samples for remixing.
 
 ## Get the app
 
-Go to **Releases** (right side of this page), download **MultiCrack.exe**, and double-click it.
+Go to **Releases** (right side of this page), download **Xenakis.exe**, and double-click it.
 No install needed. The first time, Windows may show "Windows protected your PC": click
 **More info → Run anyway**.
 
 ## How it works
 
 1. **Load:** type the artist and song, then drop in stems or a whole stem folder.
-   MultiCrack works out what each file is (kick, hats, drum loops, FX, vocals, guitar...).
+   Xenakis works out what each file is (kick, hats, drum loops, FX, vocals, guitar...).
    Change any type, or switch a file to Manual, before processing.
    Drop a folder that holds several song folders (named like `Artist - Song`) to queue them up.
 2. **Review:** every chop shows up with its waveform. Press play, drag the blue handles to trim,
@@ -29,7 +31,7 @@ No install needed. The first time, Windows may show "Windows protected your PC":
    song loads with one click.
 
 Your work is saved automatically. If the app closes, it offers to pick up where you left off.
-Menu › Save session as… / Open session… keep a session as a file. MultiCrack checks for new
+Menu › Save session as… / Open session… keep a session as a file (`.xenakis`). Xenakis checks for new
 versions when it starts and updates itself with one click.
 
 ### Keys on the Review page
@@ -85,4 +87,14 @@ python -m multicrack --selftest   # quick check of the engine and window
 python tools/run_stems.py <folder> [--export OUTDIR]   # print what the engine finds
 ```
 
-Every push to `main` builds `MultiCrack.exe` on Windows, self-tests it, and publishes it as a release.
+Every push to `main` builds `Xenakis.exe` on Windows, self-tests it, and publishes it as a release.
+
+## Name and logo
+
+Named for Iannis Xenakis, the composer and architect who built music and buildings out of straight
+lines (string glissandi in *Metastaseis*, the ruled surfaces of the Philips Pavilion). The logo's X is
+made the same way: two bands of straight lines whose crossings form the curves.
+
+The app was called MultiCrack before. Settings, the autosave and `.multicrack` session files carry
+over, and copies of MultiCrack.exe update straight to Xenakis. The Python package is still named
+`multicrack`.

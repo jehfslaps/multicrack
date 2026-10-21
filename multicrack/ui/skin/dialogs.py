@@ -129,13 +129,13 @@ class MessageDialog(HwDialog):
         self.accept()
 
 
-def ask(parent, message, yes="Yes", no="No", title="MultiCrack") -> bool:
+def ask(parent, message, yes="Yes", no="No", title="Xenakis") -> bool:
     d = MessageDialog(parent, title, message, [("no", no, "dark"), ("yes", yes, "red")])
     d.exec()
     return d.result_key == "yes"
 
 
-def inform(parent, message, title="MultiCrack", button="OK"):
+def inform(parent, message, title="Xenakis", button="OK"):
     d = MessageDialog(parent, title, message, [("ok", button, "red")])
     d.exec()
 

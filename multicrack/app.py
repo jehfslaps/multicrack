@@ -11,14 +11,15 @@ def main(argv=None):
     if sys.platform == "win32":
         try:  # own taskbar icon instead of the Python one
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("MultiCrack.App")
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Xenakis.App")
         except Exception:
             pass
     from PySide6.QtWidgets import QApplication
 
     from .ui.main_window import MainWindow
     app = QApplication(sys.argv[:1])
-    app.setApplicationName("MultiCrack")
+    from . import APP_NAME
+    app.setApplicationName(APP_NAME)
     app.setStyle("Fusion")
     win = MainWindow()
     files = [a for a in argv if os.path.exists(a)]

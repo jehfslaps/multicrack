@@ -174,21 +174,5 @@ def trash(color, size=18):
 
 
 def app_icon():
-    size = 64
-    pm = QPixmap(size, size)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing)
-    p.setPen(Qt.NoPen)
-    p.setBrush(QColor("#1C2126"))
-    p.drawRoundedRect(QRectF(2, 2, 60, 60), 12, 12)
-    pen = QPen(QColor("#86D9A0"), 4.5)
-    pen.setCapStyle(Qt.RoundCap)
-    pen.setJoinStyle(Qt.RoundJoin)
-    p.setPen(pen)
-    path = QPainterPath(QPointF(10, 32))
-    for x, y in ((18, 32), (23, 16), (30, 48), (37, 20), (42, 40), (46, 32), (54, 32)):
-        path.lineTo(x, y)
-    p.drawPath(path)
-    p.end()
-    return QIcon(pm)
+    from .logo import app_icon as _a
+    return _a()

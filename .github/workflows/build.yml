@@ -1,4 +1,4 @@
-name: Build MultiCrack
+name: Build Xenakis
 
 on:
   push:
@@ -33,41 +33,49 @@ jobs:
         shell: bash
         run: echo 'BUILD = "1.0.${{ github.run_number }}"' > multicrack/_build.py
 
-      - name: Build MultiCrack.exe
+      - name: Build Xenakis.exe
         run: >
           pyinstaller --noconfirm --clean --onefile --windowed
-          --name MultiCrack --icon assets/MultiCrack.ico
+          --name Xenakis --icon assets/Xenakis.ico
           --add-data "assets/models;assets/models"
           --add-data "assets/fonts;assets/fonts"
           --collect-all sherpa_onnx
           --exclude-module tkinter --exclude-module matplotlib
-          MultiCrack.py
+          Xenakis.py
 
       - name: Self-test (exe)
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath "dist\MultiCrack.exe" -ArgumentList "--selftest" -Wait -PassThru
+          $p = Start-Process -FilePath "dist\Xenakis.exe" -ArgumentList "--selftest" -Wait -PassThru
           if ($p.ExitCode -ne 0) {
-            Get-Content "$env:TEMP\multicrack_selftest.log" -ErrorAction SilentlyContinue
+            Get-Content "$env:TEMP\xenakis_selftest.log" -ErrorAction SilentlyContinue
             exit 1
           }
           "exe self-test passed"
-          (Get-Item "dist\MultiCrack.exe").Length / 1MB
+          (Get-Item "dist\Xenakis.exe").Length / 1MB
+
+      - name: Legacy copy for MultiCrack auto-update
+        shell: pwsh
+        run: Copy-Item "dist\Xenakis.exe" "dist\MultiCrack.exe"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MultiCrack
-          path: dist/MultiCrack.exe
+          name: Xenakis
+          path: dist/Xenakis.exe
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: MultiCrack 1.0.${{ github.run_number }}
+          name: Xenakis 1.0.${{ github.run_number }}
           make_latest: true
-          files: dist/MultiCrack.exe
+          files: |
+            dist/Xenakis.exe
+            dist/MultiCrack.exe
           body: |
-            Download **MultiCrack.exe** below and double-click it. No install needed.
+            Download **Xenakis.exe** below and double-click it. No install needed.
+
+            (MultiCrack.exe is the same program, kept only so copies from before the rename can auto-update.)
 
             First launch: Windows may say "Windows protected your PC". Click **More info → Run anyway**
             (the app isn't signed with a paid certificate).

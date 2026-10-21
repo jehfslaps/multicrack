@@ -1,4 +1,4 @@
-"""Hardware-style widgets for the MultiCrack skin."""
+"""Hardware-style widgets for the Xenakis skin."""
 from __future__ import annotations
 
 import math
@@ -1079,7 +1079,7 @@ class ModeSwitch(QAbstractButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
         self.setFixedSize(150, 30)
-        self.setToolTip("Auto: MultiCrack chops it. Manual: you mark the regions yourself.")
+        self.setToolTip("Auto: Xenakis chops it. Manual: you mark the regions yourself.")
 
     def paintEvent(self, _e):
         p = QPainter(self)
@@ -1232,3 +1232,18 @@ class Badge(QWidget):
         p.setPen(QPen(QColor(255, 255, 255, 60), 1))
         p.drawLine(QPointF(r.left() + 2, r.bottom() + 0.5), QPointF(r.right() - 2, r.bottom() + 0.5))
         K.text(p, r, self.text_, K.font(self.px, 500, 1.2), C(self.color_key), Qt.AlignCenter)
+
+
+class LogoMark(QWidget):
+    """The Xenakis mark in its dark display window, for the brand plate."""
+
+    def __init__(self, size=46, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        self.setToolTip("Xenakis")
+
+    def paintEvent(self, e):
+        from ..logo import paint_logo
+        p = QPainter(self)
+        paint_logo(p, QRectF(self.rect()), plate=False)
+        p.end()

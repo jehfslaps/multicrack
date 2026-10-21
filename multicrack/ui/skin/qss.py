@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen,
 
 from . import core as K
 
-_dir = os.path.join(tempfile.gettempdir(), "MultiCrack", "skin")
+_dir = os.path.join(tempfile.gettempdir(), "Xenakis", "skin")
 
 
 def _img(name, size, paint):

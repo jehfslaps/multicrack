@@ -1,4 +1,4 @@
-"""Launcher used to build MultiCrack.exe."""
+"""Launcher used to build Xenakis.exe."""
 import sys
 
 from multicrack.app import main

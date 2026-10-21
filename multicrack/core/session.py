@@ -1,4 +1,4 @@
-"""Saving and reopening a MultiCrack session (song info, stems, every chop and its edits)."""
+"""Saving and reopening a Xenakis session (song info, stems, every chop and its edits)."""
 from __future__ import annotations
 
 import json
@@ -9,14 +9,16 @@ from dataclasses import asdict, fields
 from .audio import load_stems
 from .model import Chop
 
-EXT = ".multicrack"
+EXT = ".xenakis"
+OPEN_EXTS = (EXT, ".multicrack")  # sessions saved before the rename still open
+APPS = ("Xenakis", "MultiCrack")
 CHOP_FIELDS = [f.name for f in fields(Chop) if f.name not in ("id", "stem_id")]
 
 
 def to_dict(meta: dict, stems, chops, queue=None, finished=False) -> dict:
     index = {s.id: i for i, s in enumerate(stems)}
     return {
-        "app": "MultiCrack", "version": 1, "saved": time.time(), "finished": bool(finished),
+        "app": "Xenakis", "version": 1, "saved": time.time(), "finished": bool(finished),
         "meta": meta,
         "stems": [{"sources": list(s.sources or [s.path]), "kind": s.kind, "mode": s.mode,
                    "options": s.options, "status": s.status} for s in stems],
@@ -47,8 +49,8 @@ def _jsonable(o):
 def read(path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    if data.get("app") != "MultiCrack":
-        raise ValueError("This isn't a MultiCrack session file.")
+    if data.get("app") not in APPS:
+        raise ValueError("This isn't a Xenakis session file.")
     return data
 
 

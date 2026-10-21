@@ -52,7 +52,7 @@ def run(gui=True) -> int:
         assert song and abs(song["bpm"] - 120) < 0.6, song
         assert any(c.label == "Kick" for c in chops), [c.label for c in chops]
         assert any(c.kind == "loop" for c in chops), [c.kind for c in chops]
-        out = tempfile.mkdtemp(prefix="multicrack_selftest_")
+        out = tempfile.mkdtemp(prefix="xenakis_selftest_")
         files = pipeline.export({s.id: s for s in stems}, chops, out, make_prefix("Self", "Test"))
         assert files and all(os.path.getsize(f) > 44 for f in files)
         with open(files[0], "rb") as f:
@@ -109,7 +109,7 @@ def run(gui=True) -> int:
             w.toggle_theme()
             from ..ui.skin import core as SK
             assert SK.FAMILY == "IBM Plex Mono", f"bundled font missing ({SK.FAMILY})"
-            w.autosave_path = os.path.join(out, "autosave.multicrack")
+            w.autosave_path = os.path.join(out, "autosave.xenakis")
             w.autosave()
             assert os.path.exists(w.autosave_path)
             w.close()
@@ -119,7 +119,7 @@ def run(gui=True) -> int:
     except Exception:
         traceback.print_exc()
         try:
-            log = os.path.join(tempfile.gettempdir(), "multicrack_selftest.log")
+            log = os.path.join(tempfile.gettempdir(), "xenakis_selftest.log")
             with open(log, "w") as f:
                 traceback.print_exc(file=f)
         except Exception:

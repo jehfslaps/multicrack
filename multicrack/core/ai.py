@@ -128,7 +128,7 @@ KIND_TAGS = {
            "Chirp tone": 0.8, "Thunder": 1, "Bang": 1, "Laser": 1.3, "Sine wave": 0.3},
 }
 
-FX_MAP = [  # (AudioSet tags, MultiCrack label)
+FX_MAP = [  # (AudioSet tags, Xenakis label)
     ({"Air horn, truck horn", "Vehicle horn, car horn, honking", "Foghorn", "Toot"}, "Air Horn"),
     ({"Siren", "Civil defense siren", "Police car (siren)", "Ambulance (siren)",
       "Fire engine, fire truck (siren)", "Fire alarm", "Alarm"}, "Siren"),
