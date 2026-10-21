@@ -15,6 +15,10 @@ No install needed. The first time, Windows may show "Windows protected your PC":
    Change any type, or switch a file to Manual, before processing.
 2. **Review:** every chop shows up with its waveform. Press play, drag the blue handles to trim,
    change the type from the dropdown, and give it a thumbs up. When everything is green, export.
+   Keys on the Review page: **↑ / ↓** move through the chops and play each one, **Space** plays,
+   **Enter** approves, **Delete** removes, **Ctrl+D** clones. In the trim editor, scroll to zoom
+   (all the way out to the whole stem), Shift+scroll to move, and drag across the waveform to
+   pick a new section.
 3. **Export:** all files land in one folder on your Desktop, for example
    `Taylor Swift - Style (Chopped)`, named like `TS_Style_Kick_01.wav`.
 

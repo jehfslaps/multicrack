@@ -1,4 +1,4 @@
 """MultiCrack: chop stems and multitracks into clean, labeled samples."""
 
-__version__ = "1.0.3"
+__version__ = "1.0.4"
 APP_NAME = "MultiCrack"

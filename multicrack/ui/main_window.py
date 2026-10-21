@@ -247,6 +247,13 @@ class MainWindow(QMainWindow):
         self._run(Job(rechop, stem, self.song),
                   lambda chops: self.replace_chops(stem, chops), f"Re-chopping {stem.name}…")
 
+    def chops_edited(self, stem_id):
+        st = self.stem_by_id(stem_id)
+        if st is not None:
+            n = sum(1 for c in self.chops if c.stem_id == stem_id)
+            st.status = f"{n} chops" if n else "Nothing kept"
+            self.load_page.refresh()
+
     def replace_chops(self, stem, chops, status=None, go_review=True):
         order = {s.id: i for i, s in enumerate(self.stems)}
         self.chops = [c for c in self.chops if c.stem_id != stem.id] + list(chops)

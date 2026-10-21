@@ -139,6 +139,40 @@ def close(color, size=14):
     return QIcon(pm)
 
 
+def copy(color, size=18):
+    pm = _pix(size)
+    p = _painter(pm, color, 1.5)
+    s = size / 24.0
+    p.drawRoundedRect(QRectF(8 * s, 8 * s, 12 * s, 12 * s), 2 * s, 2 * s)
+    path = QPainterPath(QPointF(16 * s, 5 * s))
+    path.lineTo(16 * s, 4 * s)
+    path.lineTo(4 * s, 4 * s)
+    path.lineTo(4 * s, 16 * s)
+    path.lineTo(5 * s, 16 * s)
+    p.drawPath(path)
+    p.end()
+    return QIcon(pm)
+
+
+def trash(color, size=18):
+    pm = _pix(size)
+    p = _painter(pm, color, 1.5)
+    s = size / 24.0
+    p.drawLine(QPointF(4 * s, 6.5 * s), QPointF(20 * s, 6.5 * s))
+    p.drawLine(QPointF(9.5 * s, 6.5 * s), QPointF(10 * s, 3.5 * s))
+    p.drawLine(QPointF(10 * s, 3.5 * s), QPointF(14 * s, 3.5 * s))
+    p.drawLine(QPointF(14 * s, 3.5 * s), QPointF(14.5 * s, 6.5 * s))
+    path = QPainterPath(QPointF(6 * s, 6.5 * s))
+    path.lineTo(7 * s, 20.5 * s)
+    path.lineTo(17 * s, 20.5 * s)
+    path.lineTo(18 * s, 6.5 * s)
+    p.drawPath(path)
+    p.drawLine(QPointF(10 * s, 10 * s), QPointF(10.3 * s, 17 * s))
+    p.drawLine(QPointF(14 * s, 10 * s), QPointF(13.7 * s, 17 * s))
+    p.end()
+    return QIcon(pm)
+
+
 def app_icon():
     size = 64
     pm = QPixmap(size, size)

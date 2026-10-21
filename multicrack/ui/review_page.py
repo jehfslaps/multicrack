@@ -1,10 +1,9 @@
 """Step 2: hear, trim, relabel and approve every chop."""
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton,
-                               QScrollArea, QScrollBar, QToolButton, QVBoxLayout, QWidget)
+                               QLayout, QLineEdit, QScrollArea, QScrollBar, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from ..core.audio import render_chop
 from ..core.naming import assign_names
@@ -19,6 +18,8 @@ class ChopRow(QFrame):
         self.page, self.chop, self.stem = page, chop, stem
         self.setObjectName("row")
         self.setProperty("selected", "false")
+        self.setMinimumHeight(62)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 6, 12, 6)
         lay.setSpacing(12)
@@ -47,6 +48,7 @@ class ChopRow(QFrame):
 
         self.combo = label_combo(chop.label)
         self.combo.setFixedWidth(170)
+        self.combo.setFocusPolicy(Qt.ClickFocus)
         self.combo.currentTextChanged.connect(self._label_changed)
         lay.addWidget(self.combo)
 
@@ -67,6 +69,21 @@ class ChopRow(QFrame):
         self.thumb.setChecked(chop.approved)
         self.thumb.toggled.connect(self._approved)
         lay.addWidget(self.thumb)
+
+        self.clone_btn = QToolButton()
+        self.clone_btn.setFixedSize(34, 36)
+        self.clone_btn.setIconSize(QSize(17, 17))
+        self.clone_btn.setToolTip("Clone this chop (Ctrl+D): adds a copy right below that you "
+                                  "can trim or label differently")
+        self.clone_btn.clicked.connect(lambda: page.clone_chop(self.chop))
+        lay.addWidget(self.clone_btn)
+
+        self.del_btn = QToolButton()
+        self.del_btn.setFixedSize(34, 36)
+        self.del_btn.setIconSize(QSize(17, 17))
+        self.del_btn.setToolTip("Delete this chop (Delete key)")
+        self.del_btn.clicked.connect(lambda: page.delete_chop(self.chop))
+        lay.addWidget(self.del_btn)
         self.update_view()
 
     def mousePressEvent(self, e):
@@ -78,6 +95,8 @@ class ChopRow(QFrame):
         if txt and not txt.startswith("—"):
             self.chop.label = txt
             self.page.names_changed()
+            if not self.combo.lineEdit().hasFocus():
+                self.page.setFocus()
 
     def _approved(self, on):
         self.chop.approved = on
@@ -87,6 +106,8 @@ class ChopRow(QFrame):
     def update_thumb(self):
         t = self.page.win.t
         self.thumb.setIcon(icons.thumb(t["on_ok"] if self.chop.approved else t["muted"]))
+        self.clone_btn.setIcon(icons.copy(t["muted"]))
+        self.del_btn.setIcon(icons.trash(t["muted"]))
 
     def update_view(self):
         self.name.setText(self.page.names.get(self.chop.id, ""))
@@ -201,6 +222,7 @@ class ReviewPage(QWidget):
         self.scroll.setWidgetResizable(True)
         self.listw = QWidget()
         self.list_lay = QVBoxLayout(self.listw)
+        self.list_lay.setSizeConstraint(QLayout.SetMinimumSize)   # never squash the rows
         self.list_lay.setContentsMargins(0, 0, 0, 0)
         self.list_lay.setSpacing(0)
         frame, fl = panel(margins=(0, 0, 0, 0), spacing=0)
@@ -212,7 +234,12 @@ class ReviewPage(QWidget):
         self.empty.setAlignment(Qt.AlignCenter)
         outer.addWidget(self.empty)
 
-        QShortcut(QKeySequence(Qt.Key_Space), self, activated=self.play_selected)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.scroll.setFocusPolicy(Qt.NoFocus)
+        # buttons shouldn't steal the keyboard from the list (arrows, Delete, Space)
+        for cls in (QPushButton, QCheckBox, QScrollBar, QToolButton):
+            for w_ in self.findChildren(cls):
+                w_.setFocusPolicy(Qt.NoFocus)
 
     # ------------------------------------------------------------------ build
     def rebuild(self):
@@ -232,6 +259,7 @@ class ReviewPage(QWidget):
             if st.id != last:
                 hdr = QFrame()
                 hdr.setObjectName("groupHeader")
+                hdr.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 hl = QHBoxLayout(hdr)
                 hl.setContentsMargins(12, 6, 12, 6)
                 n = sum(1 for x in self.win.chops if x.stem_id == st.id)
@@ -249,6 +277,9 @@ class ReviewPage(QWidget):
             self.rows[c.id] = row
             self.list_lay.addWidget(row)
         self.list_lay.addStretch(1)
+        for cls in (QPushButton, QToolButton):
+            for w_ in self.listw.findChildren(cls):
+                w_.setFocusPolicy(Qt.NoFocus)
         has = bool(self.win.chops)
         self.empty.setVisible(not has)
         self.scroll.parentWidget().setVisible(has)
@@ -288,12 +319,78 @@ class ReviewPage(QWidget):
         self.approve_all.setEnabled(n > 0 and not done)
         self.win.update_steps()
 
+    # ------------------------------------------------- keyboard, delete, clone
+    def keyPressEvent(self, e):
+        k, mods = e.key(), e.modifiers()
+        if k == Qt.Key_Down:
+            self.move_selection(1)
+        elif k == Qt.Key_Up:
+            self.move_selection(-1)
+        elif k == Qt.Key_Space:
+            self.play_selected()
+        elif k in (Qt.Key_Delete, Qt.Key_Backspace) and self.selected is not None:
+            self.delete_chop(self.selected)
+        elif k == Qt.Key_D and mods & Qt.ControlModifier and self.selected is not None:
+            self.clone_chop(self.selected)
+        elif k in (Qt.Key_Return, Qt.Key_Enter) and self.selected is not None:
+            row = self.rows.get(self.selected.id)
+            if row:
+                row.thumb.toggle()
+        else:
+            super().keyPressEvent(e)
+
+    def move_selection(self, delta):
+        chops = self.win.chops
+        if not chops:
+            return
+        ids = [c.id for c in chops]
+        i = ids.index(self.selected.id) if self.selected is not None and self.selected.id in ids else -1
+        j = max(0, min(len(chops) - 1, i + delta if i >= 0 else 0))
+        self.select(chops[j], play=True)
+        row = self.rows.get(chops[j].id)
+        if row:
+            self.scroll.ensureWidgetVisible(row, 0, 40)
+
+    def _rebuild_keep_scroll(self):
+        bar = self.scroll.verticalScrollBar()
+        pos = bar.value()
+        self.rebuild()
+        QTimer.singleShot(0, lambda: bar.setValue(pos))
+
+    def delete_chop(self, chop):
+        chops = self.win.chops
+        if chop not in chops:
+            return
+        i = chops.index(chop)
+        chops.remove(chop)
+        self.win.player.stop()
+        self.selected = chops[min(i, len(chops) - 1)] if chops else None
+        self.win.chops_edited(chop.stem_id)
+        self._rebuild_keep_scroll()
+        self.setFocus()
+
+    def clone_chop(self, chop):
+        chops = self.win.chops
+        if chop not in chops:
+            return
+        twin = chop.clone()
+        chops.insert(chops.index(chop) + 1, twin)
+        self.selected = twin
+        self.win.chops_edited(chop.stem_id)
+        self._rebuild_keep_scroll()
+        self.setFocus()
+        QTimer.singleShot(0, lambda: twin.id in self.rows and
+                          self.scroll.ensureWidgetVisible(self.rows[twin.id], 0, 40))
+
     def approve_everything(self):
         for r in self.rows.values():
             r.thumb.setChecked(True)
 
     # -------------------------------------------------------------- editing
     def select(self, chop, play=False):
+        fw = self.focusWidget()
+        if fw is None or not isinstance(fw, QLineEdit):
+            self.setFocus()
         if self.selected is not None and self.selected.id in self.rows:
             self.rows[self.selected.id].set_selected(False)
         self.selected = chop

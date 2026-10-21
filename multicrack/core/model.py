@@ -69,6 +69,10 @@ class Chop:
     def length(self) -> int:
         return max(0, self.end - self.start)
 
+    def clone(self) -> "Chop":
+        from dataclasses import replace
+        return replace(self, id=next(_ids), approved=False)
+
 
 @dataclass
 class Stem:
