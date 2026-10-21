@@ -25,8 +25,17 @@ def get_analysis(stem: Stem) -> Analysis:
 
 
 def get_onsets(stem: Stem, an: Analysis) -> np.ndarray:
+    """Onsets with false hits removed (spots where the sound doesn't actually get louder and
+    the attack is weak). Those used to end chops early."""
     if "onsets" not in stem.analysis:
-        stem.analysis["onsets"] = an.onsets()
+        raw = an.onsets()
+        if len(raw) > 2:
+            ra = np.array([_reattack_db(an, int(o)) for o in raw])
+            fl = np.array([an.flux[max(0, int(o) // an.HOP_ONSET - 1):int(o) // an.HOP_ONSET + 4].max()
+                           for o in raw])
+            rel = fl / (np.median(fl) + 1e-12)
+            raw = raw[~((ra < 2.0) & (rel < 0.5))]
+        stem.analysis["onsets"] = raw
     return stem.analysis["onsets"]
 
 
@@ -366,19 +375,7 @@ def events_engine(stem: Stem, bpm=None) -> list[Chop]:
     for s, e in _regions(an, P["gap"], P["min_len"]):
         s = an.refine_start(s) if family != "melodic" else s
         if family == "melodic":
-            ons = [int(o) for o in get_onsets(stem, an) if s - int(0.02 * sr) <= o < e
-                   and _reattack_db(an, int(o)) >= 3.0]
-            if not ons:
-                ons = [s]
-            merged = [ons[0]]
-            for o in ons[1:]:
-                if o - merged[-1] >= int(0.2 * sr):
-                    merged.append(o)
-            for k, o in enumerate(merged):
-                natural = merged[k + 1] - int(0.0015 * sr) if k + 1 < len(merged) else e
-                end = min(natural, o + int(P["max_len"] * sr))
-                if (end - o) / sr >= P["min_len"]:
-                    segs.append((o, end, end < natural))
+            segs.extend(_melodic_units(stem, an, s, e, bpm))
         else:
             for a, b in _split_long(an, s, e, P["max_len"], 0.8 if family == "vocal" else 1.5):
                 nxt = b + int(0.25 * sr)
@@ -409,8 +406,8 @@ def events_engine(stem: Stem, bpm=None) -> list[Chop]:
             if rnd < len(pg) and len(picked) < P["cap"]:
                 picked.append(pg[rnd])
     if family == "melodic":
-        picked = picked[:max(1, P["cap"] - 3)]
-        phrase_chops = _phrases(stem, an, ctx)
+        picked = picked[:6]
+        phrase_chops = _phrases(stem, an, ctx, bars=1, cap=3) + _phrases(stem, an, ctx, bars=2, cap=3)
     else:
         phrase_chops = []
     chops = []
@@ -428,6 +425,36 @@ def events_engine(stem: Stem, bpm=None) -> list[Chop]:
     return chops
 
 
+def _melodic_units(stem: Stem, an: Analysis, s: int, e: int, bpm) -> list:
+    """Split a melodic passage into musical units: each starts on a clear new attack, lasts at
+    least one beat, and runs until the next clear attack (at most one bar)."""
+    sr = an.sr
+    beat = (60.0 / bpm) if bpm else 0.48
+    min_unit = int(beat * sr * 0.95)
+    max_unit = int(4 * beat * sr)
+    strong = [int(o) for o in get_onsets(stem, an)
+              if s + int(0.05 * sr) <= o < e - int(0.05 * sr) and _reattack_db(an, int(o)) >= 6.0]
+    starts = [an.refine_start(s)] + strong
+    out = []
+    i = 0
+    while i < len(starts):
+        st = starts[i]
+        j = i + 1
+        while j < len(starts) and starts[j] - st < min_unit:
+            j += 1
+        if j < len(starts):
+            natural = starts[j] - int(0.003 * sr)
+        else:   # end of the passage: keep the full release
+            natural, _cut = an.tail_end(max(st, e - int(0.03 * sr)), min(an.n, e + int(2.0 * sr)),
+                                        rel_db=-55.0)
+            natural = max(natural, e)
+        end = min(natural, st + max_unit)
+        if end - st >= int(0.12 * sr):
+            out.append((st, end, end < natural))
+        i = j
+    return out
+
+
 def _reattack_db(an: Analysis, o: int) -> float:
     """How much louder the sound gets right after an onset (dB)."""
     sr, H = an.sr, an.HOP_ENV
@@ -439,7 +466,7 @@ def _reattack_db(an: Analysis, o: int) -> float:
 
 
 def _phrases(stem: Stem, an: Analysis, ctx: str, bars: int = 2, cap: int = 3) -> list[Chop]:
-    """Bar-aligned 2-bar phrase suggestions (riffs, chord progressions)."""
+    """Bar-aligned phrase suggestions (riffs, chord progressions)."""
     grid = stem.analysis.get("grid")
     if not grid:
         return []
