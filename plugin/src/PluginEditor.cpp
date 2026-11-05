@@ -6,8 +6,7 @@ namespace xk::ui
 MainView::MainView (Session& s) : session (s)
 {
     applyTheme (session.settings().get ("theme", "light") == "dark");
-    setLookAndFeel (&lnf);
-    juce::LookAndFeel::setDefaultLookAndFeel (&lnf);
+    setLookAndFeel (&lnf);   // children and popups use it; the global default is left alone
     ctx.go = [this] (int p) { go (p); };
     addAndMakeVisible (brand);
     brand.addAndMakeVisible (mark);
@@ -44,7 +43,6 @@ MainView::MainView (Session& s) : session (s)
 MainView::~MainView()
 {
     session.removeChangeListener (this);
-    juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     setLookAndFeel (nullptr);
 }
 
@@ -133,6 +131,8 @@ void MainView::timerCallback()
 void MainView::showMenu()
 {
     juce::PopupMenu m, sizes;
+    m.setLookAndFeel (&lnf);
+    sizes.setLookAndFeel (&lnf);
     const auto cur = session.settings().get ("ui_size", "medium");
     sizes.addItem (11, "Small", true, cur == "small");
     sizes.addItem (12, "Medium (default)", true, cur == "medium");
