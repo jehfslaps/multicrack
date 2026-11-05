@@ -5,3 +5,7 @@ dist/
 *.spec
 .venv/
 multicrack/_build.py
+cv/
+cv-src/
+pluginval/
+pv-logs/

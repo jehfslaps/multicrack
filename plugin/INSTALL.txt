@@ -1,0 +1,30 @@
+XENAKIS PLUG-IN (VST3 + CLAP) FOR WINDOWS 11
+============================================
+
+1. Before unzipping: right-click the zip > Properties > tick "Unblock" (if you see it) > OK.
+   That stops Windows from flagging the plug-in files as downloaded from the internet.
+
+2. Copy the plug-in into the standard folders (Windows asks for permission once):
+
+   VST3 (works in every DAW):
+       copy the whole "Xenakis.vst3" folder into
+       C:\Program Files\Common Files\VST3
+
+   CLAP (Bitwig, Reaper, FL Studio 2024+ and other CLAP hosts):
+       copy "Xenakis.clap" into
+       C:\Program Files\Common Files\CLAP
+       (create the CLAP folder if it isn't there)
+
+   You only need one of the two. Installing both is fine; your DAW lists them separately.
+
+3. Rescan plug-ins in your DAW.
+   FL Studio: Options > Manage plugins > Find more plugins.
+   Ableton Live: Settings > Plug-ins > Rescan.
+   Reaper: Options > Preferences > Plug-ins > VST/CLAP > Re-scan.
+
+4. Load "Xenakis" as an effect on any mixer track or insert. Open it, drop in your stems,
+   press PROCESS ALL, review, and drag samples straight from the list into your project.
+   Chops you audition play through that track's output. "Preview level" (a plug-in
+   parameter) sets how loud they are.
+
+To update, close the DAW and replace the files with the new ones.

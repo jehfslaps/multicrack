@@ -9,6 +9,7 @@ permissions:
   contents: write
 
 jobs:
+  # ---------------------------------------------------------------- desktop app
   windows:
     runs-on: windows-latest
     steps:
@@ -60,8 +61,83 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Xenakis
-          path: dist/Xenakis.exe
+          name: app
+          path: |
+            dist/Xenakis.exe
+            dist/MultiCrack.exe
+
+  # ---------------------------------------------------------------- VST3 + CLAP plug-in
+  plugin:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S plugin -B build -DXENAKIS_VERSION=1.0.${{ github.run_number }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel --target Xenakis_VST3 Xenakis_CLAP xk_engine_cli
+
+      - name: Engine self-test
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse build -Filter xk_engine_cli.exe | Select-Object -First 1
+          & $exe.FullName --selftest
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Validate VST3 (pluginval, strictness 10)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip -OutFile pluginval.zip
+          Expand-Archive pluginval.zip -DestinationPath pluginval
+          $vst3 = Resolve-Path "build\Xenakis_artefacts\Release\VST3\Xenakis.vst3"
+          $p = Start-Process -FilePath "pluginval\pluginval.exe" -ArgumentList "--strictness-level 10 --validate-in-process --timeout-ms 300000 --output-dir pv-logs --validate `"$vst3`"" -Wait -PassThru -NoNewWindow
+          Get-ChildItem pv-logs -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName -Tail 40 }
+          if ($p.ExitCode -ne 0) { exit 1 }
+          "pluginval passed"
+
+      - name: Cache clap-validator
+        uses: actions/cache@v4
+        with:
+          path: cv/target/release/clap-validator.exe
+          key: clap-validator-0.4.1-windows
+
+      - name: Validate CLAP (clap-validator)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path cv/target/release/clap-validator.exe)) {
+            git clone --depth 1 --branch 0.4.1 https://github.com/free-audio/clap-validator.git cv-src
+            cargo build --release --manifest-path cv-src/Cargo.toml
+            New-Item -ItemType Directory -Force cv/target/release | Out-Null
+            Copy-Item cv-src/target/release/clap-validator.exe cv/target/release/
+          }
+          cv/target/release/clap-validator.exe validate build/Xenakis_artefacts/Release/CLAP/Xenakis.clap
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $stage = "Xenakis-Plugin-Windows"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item -Recurse "build\Xenakis_artefacts\Release\VST3\Xenakis.vst3" "$stage\Xenakis.vst3"
+          Copy-Item "build\Xenakis_artefacts\Release\CLAP\Xenakis.clap" "$stage\Xenakis.clap"
+          Copy-Item "plugin\INSTALL.txt" "$stage\INSTALL.txt"
+          Compress-Archive -Path "$stage\*" -DestinationPath "Xenakis-Plugin-Windows.zip"
+          (Get-Item "Xenakis-Plugin-Windows.zip").Length / 1MB
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin
+          path: Xenakis-Plugin-Windows.zip
+
+  # ---------------------------------------------------------------- release
+  release:
+    needs: [windows, plugin]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -70,12 +146,19 @@ jobs:
           name: Xenakis 1.0.${{ github.run_number }}
           make_latest: true
           files: |
-            dist/Xenakis.exe
-            dist/MultiCrack.exe
+            out/app/Xenakis.exe
+            out/app/MultiCrack.exe
+            out/plugin/Xenakis-Plugin-Windows.zip
           body: |
-            Download **Xenakis.exe** below and double-click it. No install needed.
-
-            (MultiCrack.exe is the same program, kept only so copies from before the rename can auto-update.)
-
+            **Desktop app:** download **Xenakis.exe** below and double-click it. No install needed.
             First launch: Windows may say "Windows protected your PC". Click **More info → Run anyway**
             (the app isn't signed with a paid certificate).
+
+            **Plug-in (VST3 + CLAP):** download **Xenakis-Plugin-Windows.zip**, then
+            1. right-click the zip › Properties › tick **Unblock** (if shown) › OK, and unzip it
+            2. copy the **Xenakis.vst3** folder into `C:\Program Files\Common Files\VST3`
+               and/or **Xenakis.clap** into `C:\Program Files\Common Files\CLAP`
+            3. rescan plug-ins in your DAW (FL Studio: Options › Manage plugins › Find more plugins)
+            4. load **Xenakis** as an effect on any mixer track
+
+            (MultiCrack.exe is the same app, kept only so copies from before the rename can auto-update.)

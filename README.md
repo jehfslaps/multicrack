@@ -79,6 +79,26 @@ Any file can be opened in **Edit regions** to mark parts by hand.
 - The whole song shares one tempo, found from the clearest drum stem
 - Split mono files ending in `_L` / `_R` are joined back into stereo when both halves are present
 
+## Plug-in (VST3 + CLAP)
+
+Xenakis also runs inside your DAW. Download **Xenakis-Plugin-Windows.zip** from Releases and
+follow `INSTALL.txt` inside it: copy `Xenakis.vst3` into `C:\Program Files\Common Files\VST3`
+and/or `Xenakis.clap` into `C:\Program Files\Common Files\CLAP`, then rescan plug-ins.
+Load it as an effect on any mixer track, drop in stems, press Process all, review, and drag
+samples from the list straight into your project. Chops you audition play through that track.
+
+The plug-in is a C++ (JUCE) rebuild of the same engine, in `plugin/`. It makes exactly the same
+chops as the desktop app (checked file-for-file on real stems). Stage 1 covers loading, chopping,
+the review list (approve, type, delete, drag out) and export; the trim editor, fades, undo, the
+AI sound recognition and saving the session in your DAW project come next.
+
+```
+cmake -S plugin -B build && cmake --build build --config Release --target Xenakis_VST3 Xenakis_CLAP
+build/.../xk_engine_cli --selftest             # engine check
+build/.../xk_engine_cli <stems folder>         # what the C++ engine finds
+python plugin/tools/compare_engine.py <folder> # what the Python engine finds (same format)
+```
+
 ## Sound recognition
 
 File names come first. When a name is unclear or points two ways, a bundled trained model
