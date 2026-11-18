@@ -32,7 +32,11 @@ jobs:
 
       - name: Stamp the version
         shell: bash
-        run: echo 'BUILD = "1.0.${{ github.run_number }}"' > multicrack/_build.py
+        run: |
+          # BUILD orders updates (internal); DISPLAY is the public version from the VERSION file
+          echo 'BUILD = "1.0.${{ github.run_number }}"' > multicrack/_build.py
+          echo "DISPLAY = \"$(tr -d ' \r\n' < VERSION)\"" >> multicrack/_build.py
+          cat multicrack/_build.py
 
       - name: Build Xenakis.exe
         run: >
@@ -73,7 +77,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure
-        run: cmake -S plugin -B build -DXENAKIS_VERSION=1.0.${{ github.run_number }}
+        run: cmake -S plugin -B build
 
       - name: Build
         run: cmake --build build --config Release --parallel --target Xenakis_VST3 Xenakis_CLAP xk_engine_cli
@@ -114,51 +118,123 @@ jobs:
           cv/target/release/clap-validator.exe validate build/Xenakis_artefacts/Release/CLAP/Xenakis.clap
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
-      - name: Package
+      - name: Collect
         shell: pwsh
         run: |
-          $stage = "Xenakis-Plugin-Windows"
-          New-Item -ItemType Directory -Force $stage | Out-Null
-          Copy-Item -Recurse "build\Xenakis_artefacts\Release\VST3\Xenakis.vst3" "$stage\Xenakis.vst3"
-          Copy-Item "build\Xenakis_artefacts\Release\CLAP\Xenakis.clap" "$stage\Xenakis.clap"
-          Copy-Item "plugin\INSTALL.txt" "$stage\INSTALL.txt"
-          Compress-Archive -Path "$stage\*" -DestinationPath "Xenakis-Plugin-Windows.zip"
-          (Get-Item "Xenakis-Plugin-Windows.zip").Length / 1MB
+          New-Item -ItemType Directory -Force plug | Out-Null
+          Copy-Item -Recurse "build\Xenakis_artefacts\Release\VST3\Xenakis.vst3" "plug\Xenakis.vst3"
+          Copy-Item "build\Xenakis_artefacts\Release\CLAP\Xenakis.clap" "plug\Xenakis.clap"
 
       - uses: actions/upload-artifact@v4
         with:
           name: plugin
-          path: Xenakis-Plugin-Windows.zip
+          path: plug/
 
-  # ---------------------------------------------------------------- release
-  release:
+  # ---------------------------------------------------------------- installer (NSIS, built on Linux)
+  installer:
     needs: [windows, plugin]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Install NSIS
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nsis zip
+
       - uses: actions/download-artifact@v4
         with:
+          path: art
+
+      - name: Build Install Xenakis.exe and the zip
+        run: |
+          tools/package_windows.sh art/app/Xenakis.exe art/plugin/Xenakis.vst3 art/plugin/Xenakis.clap out
+          cp art/app/Xenakis.exe art/app/MultiCrack.exe out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: out/
+
+  # ---------------------------------------------------------------- try the installer on real Windows
+  installer-test:
+    needs: installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: rel
+
+      - name: Install, run, install again, uninstall
+        shell: pwsh
+        run: |
+          $dir = "C:\Program Files\slapworx\Xenakis"
+          $vst3 = "C:\Program Files\Common Files\VST3\Xenakis.vst3\Contents\x86_64-win\Xenakis.vst3"
+          $clap = "C:\Program Files\Common Files\CLAP\Xenakis.clap"
+          $key = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\slapworx Xenakis"
+          function Need($ok, $what) { if (-not $ok) { Write-Error "FAILED: $what"; exit 1 } else { "ok: $what" } }
+          foreach ($round in 1, 2) {
+            $p = Start-Process "rel\Install-Xenakis.exe" -ArgumentList "/S" -Wait -PassThru
+            Need ($p.ExitCode -eq 0) "installer exit code (round $round)"
+            Need (Test-Path "$dir\Xenakis.exe") "app installed"
+            Need (Test-Path "$dir\Uninstall Xenakis.exe") "uninstaller"
+            Need (Test-Path $vst3) "VST3 installed"
+            Need (Test-Path $clap) "CLAP installed"
+            Need (Test-Path "$dir\licenses\THIRD-PARTY.txt") "licenses"
+            Need (Test-Path "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\slapworx\Xenakis.lnk") "Start menu shortcut"
+            Need (Test-Path "C:\Users\Public\Desktop\Xenakis.lnk") "desktop shortcut"
+            $r = Get-ItemProperty $key
+            Need ($r.DisplayName -eq "Xenakis (slapworx)") "Installed apps entry ($($r.DisplayName) $($r.DisplayVersion))"
+          }
+          $p = Start-Process "$dir\Xenakis.exe" -ArgumentList "--selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:TEMP\xenakis_selftest.log" -ErrorAction SilentlyContinue }
+          Need ($p.ExitCode -eq 0) "installed app self-test"
+          (Get-Item "rel\Install-Xenakis.exe").Length / 1MB
+          # _?= runs the uninstaller in place and waits for it
+          $p = Start-Process "$dir\Uninstall Xenakis.exe" -ArgumentList "/S", "_?=$dir" -Wait -PassThru
+          Need ($p.ExitCode -eq 0) "uninstaller exit code"
+          Need (-not (Test-Path "$dir\Xenakis.exe")) "app removed"
+          Need (-not (Test-Path "C:\Program Files\Common Files\VST3\Xenakis.vst3")) "VST3 removed"
+          Need (-not (Test-Path $clap)) "CLAP removed"
+          Need (-not (Test-Path "C:\Users\Public\Desktop\Xenakis.lnk")) "desktop shortcut removed"
+          Need (-not (Test-Path $key)) "Installed apps entry removed"
+
+  # ---------------------------------------------------------------- release
+  release:
+    needs: [installer-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
           path: out
+
+      - name: Version
+        run: echo "VER=$(tr -d ' \r\n' < VERSION)" >> $GITHUB_ENV
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
-          name: Xenakis 1.0.${{ github.run_number }}
+          name: Xenakis ${{ env.VER }}
           make_latest: true
           files: |
-            out/app/Xenakis.exe
-            out/app/MultiCrack.exe
-            out/plugin/Xenakis-Plugin-Windows.zip
+            out/Xenakis_v${{ env.VER }}_Windows.zip
+            out/Install-Xenakis.exe
+            out/Xenakis.exe
+            out/MultiCrack.exe
           body: |
-            **Desktop app:** download **Xenakis.exe** below and double-click it. No install needed.
-            First launch: Windows may say "Windows protected your PC". Click **More info → Run anyway**
-            (the app isn't signed with a paid certificate).
+            ## Xenakis ${{ env.VER }} for Windows - desktop app + plug-in (VST3 + CLAP)
 
-            **Plug-in (VST3 + CLAP):** download **Xenakis-Plugin-Windows.zip**, then
-            1. right-click the zip › Properties › tick **Unblock** (if shown) › OK, and unzip it
-            2. copy the **Xenakis.vst3** folder into `C:\Program Files\Common Files\VST3`
-               and/or **Xenakis.clap** into `C:\Program Files\Common Files\CLAP`
-            3. rescan plug-ins in your DAW (FL Studio: Options › Manage plugins › Find more plugins)
-            4. load **Xenakis** as an effect on any mixer track
+            1. Download **Xenakis_v${{ env.VER }}_Windows.zip** below and unzip it.
+            2. Close your DAW, then double-click **Install Xenakis.exe**.
+               If Windows says "Windows protected your PC": click **More info**, then **Run anyway**
+               (the picture in the zip shows where).
+            3. Keep all three ticked (Desktop app, VST3, CLAP) and click **Install**.
+            4. In FL Studio: Options > Manage plugins > Find installed plugins. Xenakis is under slapworx.
 
-            (MultiCrack.exe is the same app, kept only so copies from before the rename can auto-update.)
+            Already installed? The app updates itself: click **Update** in Xenakis.
+
+            <sub>Install-Xenakis.exe is the same installer on its own (used by the app's updater).
+            Xenakis.exe is the app without installing; MultiCrack.exe is kept only so very old copies can update.</sub>

@@ -4,11 +4,14 @@
 
 Chop stems and multitracks into clean, labeled samples for remixing.
 
-## Get the app
+## Get it
 
-Go to **Releases** (right side of this page), download **Xenakis.exe**, and double-click it.
-No install needed. The first time, Windows may show "Windows protected your PC": click
-**More info → Run anyway**.
+Go to **Releases** (right side of this page) and download **Xenakis_v1.0_Windows.zip**. Unzip it,
+close your DAW, and double-click **Install Xenakis.exe**. It installs the desktop app, the VST3
+and the CLAP plug-in (tick what you want). The first time, Windows may show "Windows protected
+your PC": click **More info → Run anyway** (the picture in the zip shows where).
+
+After that the app updates itself: when a new version is out, click **Update**.
 
 ## How it works
 
@@ -81,11 +84,12 @@ Any file can be opened in **Edit regions** to mark parts by hand.
 
 ## Plug-in (VST3 + CLAP)
 
-Xenakis also runs inside your DAW. Download **Xenakis-Plugin-Windows.zip** from Releases and
-follow `INSTALL.txt` inside it: copy `Xenakis.vst3` into `C:\Program Files\Common Files\VST3`
-and/or `Xenakis.clap` into `C:\Program Files\Common Files\CLAP`, then rescan plug-ins.
-Load it as an effect on any mixer track, drop in stems, press Process all, review, and drag
-samples from the list straight into your project. Chops you audition play through that track.
+Xenakis also runs inside your DAW. The installer puts `Xenakis.vst3` in
+`C:\Program Files\Common Files\VST3` and `Xenakis.clap` in `C:\Program Files\Common Files\CLAP`;
+rescan plug-ins and it's listed under slapworx. (The zip's `manual install` folder has the plain
+files for copying by hand.) Load it as an effect on any mixer track, drop in stems, press Process
+all, review, and drag samples from the list straight into your project. Chops you audition play
+through that track.
 
 The plug-in is a C++ (JUCE) rebuild of the same engine, in `plugin/`. It makes exactly the same
 chops as the desktop app (checked file-for-file on real stems). Stage 1 covers loading, chopping,
@@ -114,7 +118,10 @@ python -m multicrack --selftest   # quick check of the engine and window
 python tools/run_stems.py <folder> [--export OUTDIR]   # print what the engine finds
 ```
 
-Every push to `main` builds `Xenakis.exe` on Windows, self-tests it, and publishes it as a release.
+Every push to `main` builds `Xenakis.exe` and the plug-in on Windows, self-tests and validates them
+(pluginval, clap-validator), builds `Install Xenakis.exe` with NSIS (`installer/xenakis.nsi`,
+`tools/package_windows.sh`), installs, reinstalls and uninstalls it on a fresh Windows machine, and
+publishes the release. The public version is in `VERSION`; build numbers only order updates.
 
 ## Name and logo
 

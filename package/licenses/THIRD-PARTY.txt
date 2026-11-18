@@ -1,0 +1,32 @@
+Xenakis by slapworx - third-party software and fonts
+=====================================================
+
+Xenakis's own source code is public: https://github.com/jehfslaps/multicrack
+
+Desktop app (Xenakis.exe)
+  Qt for Python (PySide6, Shiboken6) ... LGPL-3.0            LGPL-3.0.txt
+     https://www.qt.io/qt-for-python  (source: https://code.qt.io)
+     Xenakis.exe is a PyInstaller bundle; you can swap in your own build of
+     Qt / PySide6 by running Xenakis from its public source code.
+  sherpa-onnx (k2-fsa) ................. Apache-2.0           Apache-2.0.txt
+  ONNX Runtime (inside sherpa-onnx) .... MIT
+  NumPy ................................ BSD-3-Clause         numpy-BSD.txt
+  python-soundfile ..................... BSD-3-Clause         soundfile-BSD.txt
+  libsndfile (inside soundfile) ........ LGPL-2.1             LGPL-2.1.txt
+  python-sounddevice ................... MIT                  sounddevice-MIT.txt
+  PortAudio (inside sounddevice) ....... MIT
+  Python ............................... PSF License          https://docs.python.org/3/license.html
+  PyInstaller bootloader ............... GPL-2.0 with the bootloader exception (allows any use)
+
+Sound-recognition model (desktop app)
+  CED-mini audio tagger, AudioSet ...... Apache-2.0           CED-mini-NOTICE.md, Apache-2.0.txt
+
+Plug-in (Xenakis.vst3, Xenakis.clap)
+  JUCE ................................. AGPLv3 / JUCE licence   JUCE-LICENSE.md
+  clap-juce-extensions ................. MIT                  clap-juce-extensions-MIT.txt
+  CLAP (free-audio) .................... MIT
+  VST3 SDK (Steinberg) ................. MIT                  VST3-SDK-MIT.txt
+     VST is a registered trademark of Steinberg Media Technologies GmbH.
+
+Font (both)
+  IBM Plex Mono ........................ SIL Open Font License 1.1   OFL-IBMPlexMono.txt

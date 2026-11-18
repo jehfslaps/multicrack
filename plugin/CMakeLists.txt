@@ -12,9 +12,19 @@ if(MSVC)
     add_compile_options(/utf-8)
 endif()
 
+# Public version ("1.0") comes from the VERSION file at the repo root. Build numbers stay internal.
 if(NOT DEFINED XENAKIS_VERSION)
-    set(XENAKIS_VERSION "1.0.0")
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" XENAKIS_VERSION)
+    string(STRIP "${XENAKIS_VERSION}" XENAKIS_VERSION)
 endif()
+# hosts want three parts (1.0 -> 1.0.0)
+set(XENAKIS_VERSION_3 "${XENAKIS_VERSION}")
+string(REGEX MATCHALL "\\." _dots "${XENAKIS_VERSION_3}")
+list(LENGTH _dots _ndots)
+while(_ndots LESS 2)
+    string(APPEND XENAKIS_VERSION_3 ".0")
+    math(EXPR _ndots "${_ndots} + 1")
+endwhile()
 
 include(FetchContent)
 FetchContent_Declare(JUCE
@@ -59,14 +69,14 @@ juce_add_binary_data(XenakisAssets
 
 # ----------------------------------------------------------------- plug-in
 juce_add_plugin(Xenakis
-    COMPANY_NAME "Xenakis"
-    COMPANY_WEBSITE "https://github.com/jehfslaps/multicrack"
+    COMPANY_NAME "slapworx"
+    COMPANY_WEBSITE "https://slapworx.net"
     BUNDLE_ID com.xenakis.plugin
     PLUGIN_MANUFACTURER_CODE Xnks
     PLUGIN_CODE Xnk1
     FORMATS VST3 Standalone
     PRODUCT_NAME "Xenakis"
-    VERSION ${XENAKIS_VERSION}
+    VERSION ${XENAKIS_VERSION_3}
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE

@@ -153,10 +153,10 @@ void MainView::showMenu()
         else if (r == 2)
             juce::AlertWindow::showAsync (juce::MessageBoxOptions()
                                               .withIconType (juce::MessageBoxIconType::NoIcon)
-                                              .withTitle ("Xenakis " XENAKIS_VERSION)
+                                              .withTitle ("Xenakis " XENAKIS_VERSION "  by slapworx")
                                               .withMessage ("Chops stems and multitracks into clean, labeled samples, right inside "
                                                             "your DAW.\n\nNamed for Iannis Xenakis, who built sound and buildings out "
-                                                            "of straight lines.\n\nFont: IBM Plex Mono (OFL).")
+                                                            "of straight lines.\n\nslapworx.net\nFont: IBM Plex Mono (OFL).")
                                               .withButton ("OK", 1),
                                           nullptr);
     });

@@ -136,7 +136,7 @@ class MainWindow(QMainWindow):
         self.autosave_path = os.path.join(data_dir, "autosave" + session.EXT)
         self._migrate_autosave(data_dir)
 
-        self.setWindowTitle(f"{APP_NAME} {updater.current_version()}")
+        self.setWindowTitle(f"{APP_NAME} {updater.display_version()}")
         self.setWindowIcon(logo.app_icon())
         self._fit_default_size()
 
@@ -156,7 +156,7 @@ class MainWindow(QMainWindow):
         self.brand_lbl = W.mono("XENAKIS", "plate_text", 28, 700, 5.0)
         brand.lay.addWidget(self.brand_lbl)
         brand.lay.addSpacing(6)
-        self.version_badge = W.Badge(f"XK-1  [v{updater.current_version()}]")
+        self.version_badge = W.Badge(f"XK-1  [v{updater.display_version()}]")
         brand.lay.addWidget(self.version_badge)
         top.addWidget(brand)
         self.steps_sel = W.StepSelector(["01 LOAD", "02 REVIEW", "03 EXPORT"])
@@ -892,13 +892,13 @@ class MainWindow(QMainWindow):
         def found(info):
             self._update = info
             if info:
-                self.update_btn.setText(f"Update to {info['version']}")
+                self.update_btn.setText("Update")
+                self.update_btn.setToolTip("A new version of Xenakis is ready")
                 self.update_btn.show()
                 if not quiet:
                     self.install_update()
             elif not quiet:
-                dialogs.inform(self, f"You're on the latest version "
-                                        f"({updater.current_version()}).")
+                dialogs.inform(self, f"You're on the latest version of {APP_NAME}.")
 
         def failed(msg):
             if not quiet:
@@ -915,8 +915,10 @@ class MainWindow(QMainWindow):
         info = self._update
         if not info or self.busy:
             return
-        if not dialogs.ask(self, f"Update {APP_NAME} to {info['version']}?\n\nIt downloads, "
-                           "restarts, and offers to pick up where you left off.", "Update",
+        if not dialogs.ask(self, f"A new version of {APP_NAME} is ready.\n\nIt downloads, "
+                           + ("runs the installer (Windows asks for permission), "
+                              if info.get("installer") else "restarts, ")
+                           + "and offers to pick up where you left off.", "Update",
                            "Update now", "Later"):
             return
         self.autosave()
@@ -924,13 +926,24 @@ class MainWindow(QMainWindow):
         def done(path):
             try:
                 self.player.stop()
-                updater.install_and_restart(path)
+                if info.get("installer"):
+                    updater.run_installer(path)
+                else:
+                    updater.install_and_restart(path)
                 QApplication.instance().quit()
+            except OSError as e:
+                if getattr(e, "winerror", None) == 1223:   # "No" on the Windows permission prompt
+                    dialogs.inform(self, "Update cancelled. Click Update to try again.")
+                    return
+                dialogs.warn(self, f"Couldn't install the update ({e}). "
+                                    "Opening the download page instead.")
+                QDesktopServices.openUrl(QUrl(updater.RELEASES_PAGE))
             except Exception as e:
                 dialogs.warn(self, f"Couldn't install the update ({e}). "
                                     "Opening the download page instead.")
                 QDesktopServices.openUrl(QUrl(updater.RELEASES_PAGE))
-        self._run(Job(lambda progress=None: updater.download(info["url"], progress)), done,
+        self._run(Job(lambda progress=None: updater.download(info["url"], progress,
+                                                             info.get("installer", False))), done,
                   "Downloading update…")
 
     # ------------------------------------------------------------ carried over from MultiCrack
@@ -960,7 +973,7 @@ class MainWindow(QMainWindow):
                 pass
 
     def about(self):
-        dialogs.inform(self, f"{APP_NAME} {updater.current_version()}\n\nChops stems and "
+        dialogs.inform(self, f"{APP_NAME} {updater.display_version()}  ·  by slapworx\n\nChops stems and "
                        "multitracks into clean, labeled samples.\n\nNamed for Iannis Xenakis, who "
                        "built sound and buildings out of straight lines; the X in the logo is woven "
                        "the same way.\n\nSound recognition: CED-mini "

@@ -1,0 +1,66 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@font-face{font-family:P;src:url(../../assets/fonts/IBMPlexMono-Regular.ttf);font-weight:400}
+@font-face{font-family:P;src:url(../../assets/fonts/IBMPlexMono-Medium.ttf);font-weight:500}
+@font-face{font-family:P;src:url(../../assets/fonts/IBMPlexMono-SemiBold.ttf);font-weight:600}
+@font-face{font-family:P;src:url(../../assets/fonts/IBMPlexMono-Bold.ttf);font-weight:700}
+*{box-sizing:border-box;margin:0}
+body{width:1600px;height:1000px;background:linear-gradient(#26272B,#151618);color:#E9E5DD;font-family:P,monospace;position:relative;overflow:hidden}
+.rail{position:absolute;left:0;top:0;bottom:0;width:14px;background:#B4473A}
+.top{position:absolute;left:84px;right:60px;top:34px;display:flex;justify-content:space-between;font-size:15px;color:#9D9890;border-bottom:1px solid rgba(233,229,221,.2);padding-bottom:12px;letter-spacing:.04em}
+.top b{color:#E9E5DD;font-weight:600}
+.logo{position:absolute;right:60px;top:78px;width:104px;height:104px}
+h1{position:absolute;left:84px;top:88px;font-weight:700;font-size:52px;letter-spacing:.01em}
+h1 i{font-style:normal;color:#E8483A}
+.sub{position:absolute;left:86px;top:166px;font-size:20px;color:#BDB8AF;max-width:1300px;line-height:1.5}
+.sub b{color:#fff;font-weight:600}
+.panel{position:absolute;top:268px;width:680px}
+.p1{left:84px}.p2{left:836px}
+.step{font-size:17px;color:#E8483A;margin-bottom:10px;letter-spacing:.08em;font-weight:600}
+.step span{color:#E9E5DD;font-size:26px;font-weight:600;letter-spacing:0;margin-left:10px}
+.win{position:relative;background:#0067B8;height:470px;padding:34px 38px;font-family:"Segoe UI",Arial,sans-serif;color:#fff;box-shadow:0 20px 50px rgba(0,0,0,.55)}
+.win .x{position:absolute;right:16px;top:8px;font-size:22px;opacity:.9}
+.win h2{font-weight:300;font-size:38px;margin:14px 0 22px}
+.win p{font-size:17px;line-height:1.45;max-width:560px}
+.win .more{margin-top:14px;font-size:17px;text-decoration:underline}
+.win .meta{margin-top:20px;font-size:17px;line-height:1.8}
+.btns{position:absolute;right:30px;bottom:28px;display:flex;gap:12px}
+.btn{border:2px solid #fff;padding:9px 26px;font-size:17px;min-width:130px;text-align:center}
+.btn.ghost{opacity:.85}
+.ring{position:absolute;border:5px solid #FFB23D;border-radius:999px;box-shadow:0 0 0 6px rgba(255,178,61,.25)}
+.tag{position:absolute;background:#FFB23D;color:#111;font-weight:700;font-size:18px;padding:6px 12px}
+.foot{position:absolute;left:84px;right:60px;bottom:34px;display:flex;justify-content:space-between;align-items:flex-end;font-size:15px;color:#7E7A73}
+.foot .ok{font-size:19px;color:#CFCAC1;max-width:1120px;line-height:1.5}
+.foot .ok b{color:#7BD88F;font-weight:600}
+</style></head><body>
+<div class="rail"></div>
+<div class="top"><span><b>Xenakis</b> / install on Windows</span><span>slapworx</span></div>
+<img class="logo" src="../../assets/Xenakis.png">
+<h1>Blue window? <i>Two clicks.</i></h1>
+<div class="sub">When you run <b>Install Xenakis.exe</b>, Windows may show a blue <b>"Windows protected your PC"</b> box.<br>That's normal for new software from small developers. It doesn't mean anything is wrong.</div>
+
+<div class="panel p1">
+  <div class="step">01<span>Click "More info"</span></div>
+  <div class="win"><div class="x">✕</div>
+    <h2>Windows protected your PC</h2>
+    <p>Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</p>
+    <div class="more">More info</div>
+    <div class="btns"><div class="btn ghost">Don't run</div></div>
+  </div>
+  <div class="ring" style="left:20px;top:211px;width:124px;height:46px"></div>
+  <div class="tag" style="left:160px;top:217px">← click here</div>
+</div>
+
+<div class="panel p2">
+  <div class="step">02<span>Click "Run anyway"</span></div>
+  <div class="win"><div class="x">✕</div>
+    <h2>Windows protected your PC</h2>
+    <p>Microsoft Defender SmartScreen prevented an unrecognized app from starting. Running this app might put your PC at risk.</p>
+    <div class="meta">App: &nbsp;Install Xenakis.exe<br>Publisher: &nbsp;Unknown publisher</div>
+    <div class="btns"><div class="btn">Run anyway</div><div class="btn ghost">Don't run</div></div>
+  </div>
+  <div class="ring" style="left:340px;top:429px;width:182px;height:66px"></div>
+  <div class="tag" style="left:362px;top:382px">click here ↓</div>
+</div>
+
+<div class="foot"><div class="ok">Then click <b>Yes</b> when Windows asks to allow changes, and the Xenakis installer opens.<br>Don't click the ✕ or "Don't run": that cancels the install.</div><span>Xenakis · slapworx.net</span></div>
+</body></html>
