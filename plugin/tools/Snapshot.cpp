@@ -139,17 +139,52 @@ int main (int argc, char** argv)
     std::printf ("after reopening: %zu chops, page %d\n", s.chops.size(), editor->getView().currentPage());
     if (editor->getView().currentPage() != 1)
         return fail ("reopened editor did not show Review");
-    // export
+    // export only what's approved (4 chops); the rest are skipped
+    s.outputFolder().deleteRecursively();
+    const int a0 = s.approvedCount();
+    if (s.toExportCount() != a0 || a0 == 0)
+        return fail ("nothing to export with chops approved");
+    editor->getView().setTheme (false);
+    pump (100);
+    save (*editor, outDir.getChildFile ("4b_review_partial.png"));
+    s.exportAll();
+    if (! waitIdle (s))
+        return fail ("export timed out");
+    pump (100);
+    std::printf ("exported %d of %zu chops to %s\n", s.lastExportFiles.size(), s.chops.size(), s.lastExportFolder.getFullPathName().toRawUTF8());
+    if (s.lastExportFiles.size() != a0 || s.toExportCount() != 0)
+        return fail ("partial export count mismatch");
+    if (editor->getView().currentPage() != 2)
+        return fail ("did not show Export after exporting");
+    save (*editor, outDir.getChildFile ("5_export_light.png"));
+    // approve two more and export again: only the two new ones are added
+    editor->getView().go (1);
+    int added = 0;
+    for (auto& c : s.chops)
+        if (! c.approved && added < 2)
+        {
+            s.setApproved (c.id, true);
+            ++added;
+        }
+    pump (50);
+    save (*editor, outDir.getChildFile ("5b_review_after_export.png"));
+    s.exportAll();
+    if (! waitIdle (s))
+        return fail ("second export timed out");
+    pump (100);
+    const int onDisk = s.lastExportFolder.getNumberOfChildFiles (juce::File::findFiles, "*.wav");
+    std::printf ("second export: %d new, %d in the folder\n", s.lastExportFiles.size(), onDisk);
+    if (s.lastExportFiles.size() != added || onDisk != a0 + added)
+        return fail ("second export repeated or lost files");
+    if (editor->getView().currentPage() != 2)
+        return fail ("did not show Export after the second export");
+    // then everything else
     s.approveAll();
     s.exportAll();
     if (! waitIdle (s))
         return fail ("export timed out");
-    std::printf ("exported %d files to %s\n", s.lastExportFiles.size(), s.lastExportFolder.getFullPathName().toRawUTF8());
-    if (s.lastExportFiles.size() != (int) s.chops.size())
+    if (s.lastExportFolder.getNumberOfChildFiles (juce::File::findFiles, "*.wav") != (int) s.chops.size())
         return fail ("export count mismatch");
-    editor->getView().setTheme (false);
-    pump (100);
-    save (*editor, outDir.getChildFile ("5_export_light.png"));
     // small UI size
     editor->setUiSize ("small");
     editor->getView().go (1);

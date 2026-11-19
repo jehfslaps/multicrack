@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QLayou
                                QWidget)
 
 from ..core.audio import default_fades_ms, render_chop, write_wav24
-from ..core.naming import assign_names
+from ..core.naming import display_names, to_export
 from .common import label_combo, magnet_to_hit
 from .skin import core as K
 from .skin import widgets as W
@@ -233,6 +233,8 @@ class ChopRow(QFrame):
     def update_view(self):
         self.name.setText(self.page.names.get(self.chop.id, ""))
         bits = [f"Stem: {self.stem.kind}"]
+        if self.chop.exported:
+            bits.insert(0, "Saved")
         if self.chop.reverse:
             bits.append("reversed")
         if self.chop.gain_db:
@@ -241,7 +243,9 @@ class ChopRow(QFrame):
         full = sub + (f"  ·  {self.chop.flag}" if self.chop.flag else "")
         fm = self.sub.fontMetrics()
         self.sub.setText(fm.elidedText(full.upper(), Qt.ElideRight, COL["name"] - 4))
-        self.sub.setToolTip(f"From {self.stem.name}" + (f"\n{self.chop.flag}" if self.chop.flag else ""))
+        self.sub.setToolTip(f"From {self.stem.name}" + (f"\n{self.chop.flag}" if self.chop.flag else "")
+                            + ("\nAlready in the export folder. Un-approve and approve it again "
+                               "to save a new copy." if self.chop.exported else ""))
         W.recolor(self.sub, "warn" if is_warning(self.chop.flag) else "on_dark_muted")
         self.dur.setText(fmt_dur(self.chop.length, self.stem.sr))
         self.wave.set_chop(self.page.win.peaks(self.stem), self.chop.start, self.chop.end,
@@ -521,7 +525,7 @@ class ReviewPage(QWidget):
         self.win.request_measure()
 
     def _compute_names(self):
-        return assign_names(self.win.chops, self.win.prefix(), self.win.output_folder())
+        return display_names(self.win.chops, self.win.prefix(), self.win.output_folder())
 
     def names_changed(self):
         self.names = self._compute_names()
@@ -539,12 +543,18 @@ class ReviewPage(QWidget):
                                if n else "NO CHOPS YET")
         self.meter.set(a / n if n else 0)
         done = n > 0 and a == n
-        self.export_btn.setEnabled(done and not self.win.busy)
-        self.export_btn.setText(("Export all" if narrow else f"Export {n} files") if done else
-                                ("Export" if narrow else "Export (approve all)"))
-        self.export_btn.setToolTip(f"Export {n} files" if done else "")
-        if not done:
-            self.export_btn.setToolTip("Approve every chop to export")
+        k = len(to_export(chops))                      # approved and not saved yet
+        saved = sum(1 for c in chops if c.exported)
+        self.export_btn.setEnabled(k > 0 and not self.win.busy)
+        self.export_btn.setText((f"Export {k}" if narrow else f"Export {k} approved") if k else
+                                ("Export" if narrow else "Export approved"))
+        if k:
+            self.export_btn.setToolTip(f"Save the {k} approved chop{'s' if k != 1 else ''} to the folder. "
+                                       "Chops you didn't approve are skipped.")
+        elif saved and a:
+            self.export_btn.setToolTip("Every approved chop is already saved. Approve more to export again.")
+        else:
+            self.export_btn.setToolTip("Approve the chops you want, then export them")
         self.approve_all.setEnabled(n > 0 and not done)
         self.undo_btn.setEnabled(self.win.history.can_undo())
         self.redo_btn.setEnabled(self.win.history.can_redo())
@@ -562,8 +572,8 @@ class ReviewPage(QWidget):
         self.meter.setMinimumWidth(70 if narrow else 160)
         for b in (self.undo_btn, self.redo_btn, self.approve_all):
             b.setMinimumWidth(0 if narrow else 122)
-        self.export_btn.setMinimumWidth(self.export_btn.width_for("Export all") if narrow else
-                                        self.export_btn.width_for("Export (approve all)"))
+        self.export_btn.setMinimumWidth(self.export_btn.width_for("Export 999") if narrow else
+                                        self.export_btn.width_for("Export 999 approved"))
         for tg in (self.fade_auto, self.ed_reverse, self.ed_seam, self.ed_loop, self.ed_snap):
             tg.show_state = not narrow
             tg.updateGeometry()
@@ -772,9 +782,13 @@ class ReviewPage(QWidget):
             return
         self.win.history.push()
         chop.approved = on
+        if not on:
+            chop.exported = ""          # approve it again to save a new copy
+        self.names_changed()            # approved chops are numbered first (what Export writes)
         row = self.rows.get(chop.id)
         if row:
             row.update_thumb()
+            row.update_view()
         self.counts_changed()
         self.win.session_changed()
 
@@ -793,6 +807,7 @@ class ReviewPage(QWidget):
             c.approved = True
         for r in self.rows.values():
             r.update_thumb()
+        self.names_changed()
         self.counts_changed()
         self.win.session_changed()
 
@@ -803,6 +818,7 @@ class ReviewPage(QWidget):
                 c.approved = True
         for r in self.rows.values():
             r.update_thumb()
+        self.names_changed()
         self.counts_changed()
         self.win.session_changed()
 

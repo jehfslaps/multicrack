@@ -33,8 +33,7 @@ MainView::MainView (Session& s) : session (s)
     addChildComponent (*reviewPage);
     addChildComponent (*exportPage);
     session.addChangeListener (this);
-    exportsSeen = session.lastExportFiles.size();
-    lastExportFolder = session.lastExportFolder.getFullPathName();
+    exportsSeen = session.exportCount;
     go (session.chops.empty() ? 0 : 1);
     refreshAll();
     startTimerHz (30);
@@ -94,9 +93,9 @@ void MainView::changeListenerCallback (juce::ChangeBroadcaster*)
     // finished processing: go to review. finished exporting: go to export.
     if (wasBusy && ! busy)
     {
-        if (session.lastExportFiles.size() > 0 && session.lastExportFolder.getFullPathName() != lastExportFolder)
+        if (session.exportCount != exportsSeen)
         {
-            lastExportFolder = session.lastExportFolder.getFullPathName();
+            exportsSeen = session.exportCount;
             refreshAll();
             go (2);
             wasBusy = busy;
@@ -110,8 +109,6 @@ void MainView::changeListenerCallback (juce::ChangeBroadcaster*)
             return;
         }
     }
-    if (session.lastExportFiles.isEmpty())
-        lastExportFolder.clear();
     wasBusy = busy;
     refreshAll();
 }

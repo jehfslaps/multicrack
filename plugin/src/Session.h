@@ -66,12 +66,15 @@ public:
     void deleteChop (int chopId);
     void setLabel (int chopId, const juce::String& label);
     int approvedCount() const;
+    int toExportCount() const;                          // approved and not saved yet
+    int savedCount() const;
     std::map<int, std::string> names() const;          // chop id -> file name
     juce::String nameOf (int chopId) const;
 
     // --- export
     juce::StringArray lastExportFiles;
     juce::File lastExportFolder;
+    int exportCount = 0;                                // goes up after every export
     void exportAll();
     void startOver();
     // renders a chop into a temp WAV (named like the export) for dragging into a DAW

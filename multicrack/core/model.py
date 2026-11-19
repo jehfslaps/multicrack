@@ -69,6 +69,7 @@ class Chop:
     reverse: bool = False
     gain_db: float = 0.0                  # 0 = full level (normalized); negative turns it down
     seam: bool = True                     # loops: crossfade the loop point so it repeats cleanly
+    exported: str = ""                    # file name it was saved as ("" = not saved yet)
     id: int = field(default_factory=lambda: next(_ids))
 
     @property
@@ -77,7 +78,7 @@ class Chop:
 
     def clone(self) -> "Chop":
         from dataclasses import replace
-        return replace(self, id=next(_ids), approved=False)
+        return replace(self, id=next(_ids), approved=False, exported="")
 
 
 @dataclass

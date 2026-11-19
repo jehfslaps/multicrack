@@ -136,7 +136,8 @@ public:
     {
         num.setText (juce::String (number));
         name.setText (fileName);
-        juce::String s = "Stem: " + juce::String (st.kind);
+        juce::String s = (c.exported.empty() ? juce::String() : juce::String ("Saved") + juce::String::fromUTF8 ("  \xc2\xb7  "))
+                       + "Stem: " + juce::String (st.kind);
         if (! c.flag.empty())
             s += juce::String::fromUTF8 ("  \xc2\xb7  ") + juce::String (c.flag);
         sub.setText (s);
@@ -347,9 +348,13 @@ void ReviewPage::updateHeader()
     auto& s = ctx.session;
     const int n = (int) s.chops.size(), a = s.approvedCount();
     const bool done = n > 0 && a == n;
+    const int k = s.toExportCount();
     meter.set (n ? (float) a / n : 0.0f);
-    exportBtn.setEnabled (done && ! s.busy());
-    exportBtn.setTooltip (done ? "Write every sample to " + s.outputFolder().getFullPathName() : "Approve every chop to export");
+    exportBtn.setEnabled (k > 0 && ! s.busy());
+    exportBtn.setTooltip (k > 0 ? "Save the " + juce::String (k) + " approved chop" + (k == 1 ? "" : "s") + " to "
+                                      + s.outputFolder().getFullPathName() + ". Chops you didn't approve are skipped."
+                          : (a > 0 && s.savedCount() > 0) ? juce::String ("Every approved chop is already saved. Approve more to export again.")
+                                                          : juce::String ("Approve the chops you want, then export them"));
     approveAll.setEnabled (n > 0 && ! done);
     resized();
 }
@@ -359,12 +364,13 @@ void ReviewPage::applyTexts()
     // labels that get shorter when the window is narrow
     auto& s = ctx.session;
     const int n = (int) s.chops.size(), a = s.approvedCount();
-    const bool done = n > 0 && a == n, narrow = ctx.narrow;
+    const bool narrow = ctx.narrow;
     count.setText (n ? (narrow ? juce::String (a) + "/" + juce::String (n) + " APPROVED"
                                : juce::String (a) + " OF " + juce::String (n) + " APPROVED")
                      : juce::String ("NO CHOPS YET"));
-    exportBtn.setButtonText (done ? (narrow ? juce::String ("Export all") : "Export " + juce::String (n) + " files")
-                                  : (narrow ? juce::String ("Export") : juce::String ("Export (approve all)")));
+    const int k = s.toExportCount();
+    exportBtn.setButtonText (k > 0 ? (narrow ? "Export " + juce::String (k) : "Export " + juce::String (k) + " approved")
+                                   : (narrow ? juce::String ("Export") : juce::String ("Export approved")));
     if (auto* c = selected >= 0 ? s.chopById (selected) : nullptr)
         if (auto* st = s.stemById (c->stemId))
             readout.set ("", juce::String (c->length() / (double) st->sr, 3) + (narrow ? " S" : " S SELECTED"));
@@ -515,7 +521,7 @@ void ReviewPage::resized()
     head.setBounds (r.removeFromTop (62));
     {
         auto c = head.getLocalBounds().reduced (20, 10);
-        const int ew = exportBtn.widthFor (narrow ? "Export all" : "Export (approve all)");
+        const int ew = exportBtn.widthFor (narrow ? "Export 999" : "Export 999 approved");
         exportBtn.setBounds (c.removeFromRight (juce::jmax (ew, exportBtn.widthFor (exportBtn.getButtonText()))).withSizeKeepingCentre (juce::jmax (ew, exportBtn.widthFor (exportBtn.getButtonText())), H_KEY));
         c.removeFromRight (10);
         const int aw = juce::jmax (narrow ? 0 : 140, approveAll.widthFor (approveAll.getButtonText()));
@@ -596,7 +602,7 @@ void ReviewPage::resized()
 ExportPage::ExportPage (Context& c) : ctx (c)
 {
     addAndMakeVisible (box);
-    for (auto* comp : std::initializer_list<juce::Component*> { &lamp, &title, &path, &outline, &specs, &again, &openBtn })
+    for (auto* comp : std::initializer_list<juce::Component*> { &lamp, &title, &path, &outline, &specs, &again, &openBtn, &back })
         box.addAndMakeVisible (comp);
     path.setReadOnly (true);
     outline.addAndMakeVisible (list);
@@ -604,6 +610,8 @@ ExportPage::ExportPage (Context& c) : ctx (c)
     list.setRowHeight (34);
     list.setColour (juce::ListBox::backgroundColourId, juce::Colours::transparentBlack);
     again.onClick = [this] { ctx.session.startOver(); ctx.go (0); };
+    back.setTooltip ("Approve more chops and export again. Only new ones are added.");
+    back.onClick = [this] { ctx.go (1); };
     openBtn.onClick = [this] {
         if (ctx.session.lastExportFolder.isDirectory())
             ctx.session.lastExportFolder.startAsProcess();
@@ -620,6 +628,8 @@ void ExportPage::refresh()
                                    : "EXPORTED " + juce::String (files.size()) + " FILE" + (files.size() == 1 ? "" : "S"));
     path.setText (s.lastExportFolder.getFullPathName(), false);
     openBtn.setEnabled (s.lastExportFolder.isDirectory());
+    // chops left that weren't saved: offer to go back, approve more and export again
+    back.setVisible (std::any_of (s.chops.begin(), s.chops.end(), [] (const Chop& c) { return c.exported.empty(); }));
     list.updateContent();
     list.repaint();
 }
@@ -659,6 +669,7 @@ void ExportPage::resized()
     openBtn.setBounds (buttons.removeFromRight (openBtn.widthFor (openBtn.getButtonText())));
     buttons.removeFromRight (12);
     again.setBounds (buttons.removeFromRight (again.widthFor (again.getButtonText())));
+    back.setBounds (buttons.removeFromLeft (back.widthFor (back.getButtonText())));
 }
 
 } // namespace xk::ui

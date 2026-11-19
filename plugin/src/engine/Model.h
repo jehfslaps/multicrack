@@ -89,10 +89,11 @@ struct Chop
     bool reverse = false;
     double gainDb = 0.0;         // 0 = full level (normalized); negative turns it down
     bool seam = true;            // loops: crossfade the loop point
+    std::string exported;        // file name it was saved as ("" = not saved yet)
     int id = nextId();
 
     int length() const { return end > start ? end - start : 0; }
-    Chop clone() const { Chop c = *this; c.id = nextId(); c.approved = false; return c; }
+    Chop clone() const { Chop c = *this; c.id = nextId(); c.approved = false; c.exported.clear(); return c; }
 };
 
 // ------------------------------------------------------------------- stems

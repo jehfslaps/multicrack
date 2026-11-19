@@ -103,6 +103,31 @@ def run(gui=True) -> int:
             assert len(w.chops) == n0 - 1
             w.review_page.clone_chop(w.chops[0])
             w.review_page.approve_and_next()
+            # export only what's approved; the rest is skipped, and a second export adds only new ones
+            from .naming import to_export
+            from .pipeline import export as write_files
+            part = os.path.join(out, "partial")
+            w.output_folder = lambda: part
+            for c in w.chops:
+                w.review_page.set_approved(c, False)
+            assert not w.review_page.export_btn.isEnabled(), "export enabled with nothing approved"
+            w.review_page.set_approved(w.chops[1], True)
+            assert w.review_page.export_btn.isEnabled(), "export locked with one chop approved"
+            todo = to_export(w.chops)
+            want = w.review_page.names[todo[0].id]
+            got = write_files({s.id: s for s in w.stems}, todo, part, w.prefix())
+            w._exported(got, part, todo)
+            assert [os.path.basename(p) for p in got] == [want], (got, want)
+            assert not w.review_page.export_btn.isEnabled(), "export enabled with everything saved"
+            w.go(1)
+            w.review_page.set_approved(w.chops[2], True)
+            todo = to_export(w.chops)
+            assert [c.id for c in todo] == [w.chops[2].id], "second export would repeat saved chops"
+            want = w.review_page.names[todo[0].id]
+            got = write_files({s.id: s for s in w.stems}, todo, part, w.prefix())
+            assert os.path.basename(got[0]) == want and len(os.listdir(part)) == 2, os.listdir(part)
+            w._exported(got, part, todo)
+            del w.output_folder
             w.theme_btn.setChecked(True)
             w.toggle_theme()
             w.theme_btn.setChecked(False)

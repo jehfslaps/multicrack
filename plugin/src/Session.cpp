@@ -262,6 +262,8 @@ void Session::setApproved (int chopId, bool on)
     if (auto* c = chopById (chopId))
     {
         c->approved = on;
+        if (! on)
+            c->exported.clear();   // approve it again to save a new copy
         changed();
     }
 }
@@ -326,6 +328,24 @@ int Session::approvedCount() const
     return n;
 }
 
+int Session::toExportCount() const
+{
+    int n = 0;
+    for (auto& c : chops)
+        n += (c.approved && c.exported.empty()) ? 1 : 0;
+    return n;
+}
+
+int Session::savedCount() const
+{
+    int n = 0;
+    for (auto& c : chops)
+        n += c.exported.empty() ? 0 : 1;
+    return n;
+}
+
+// Names as they will land in the folder: saved chops keep their saved name, approved chops are
+// numbered next (that's what Export writes), then the rest.
 std::map<int, std::string> Session::names() const
 {
     std::vector<std::string> files;
@@ -334,7 +354,16 @@ std::map<int, std::string> Session::names() const
         for (auto& f : folder.findChildFiles (juce::File::findFiles, false, "*.wav"))
             files.push_back (f.getFileName().toStdString());
     const auto pfx = effectivePrefix().toStdString();
-    return naming::assignNames (chops, pfx, naming::existingCounts (files, pfx));
+    std::vector<Chop> order;
+    for (int pass = 0; pass < 2; ++pass)
+        for (auto& c : chops)
+            if (c.exported.empty() && c.approved == (pass == 0))
+                order.push_back (c);
+    auto out = naming::assignNames (order, pfx, naming::existingCounts (files, pfx));
+    for (auto& c : chops)
+        if (! c.exported.empty())
+            out[c.id] = c.exported;
+    return out;
 }
 
 juce::String Session::nameOf (int chopId) const
@@ -347,12 +376,15 @@ juce::String Session::nameOf (int chopId) const
 // ------------------------------------------------------------------ export
 void Session::exportAll()
 {
-    if (busy_ || chops.empty())
+    if (busy_ || toExportCount() == 0)
         return;
     player.stop();
     const auto folder = outputFolder();
     const auto nm = names();
-    auto list = chops;
+    std::vector<Chop> list;   // approved and not saved yet; the rest are skipped
+    for (auto& c : chops)
+        if (c.approved && c.exported.empty())
+            list.push_back (c);
     std::map<int, StemPtr> byId;
     for (auto& s : stems)
         byId[s->id] = s;
@@ -360,6 +392,7 @@ void Session::exportAll()
         if (! folder.createDirectory())
             throw std::runtime_error ("Couldn't create the folder " + folder.getFullPathName().toStdString());
         juce::StringArray written;
+        std::vector<std::pair<int, std::string>> saved;
         for (size_t i = 0; i < list.size(); ++i)
         {
             if (cancelled())
@@ -375,10 +408,15 @@ void Session::exportAll()
             if (! f.replaceWithData (bytes.data(), bytes.size()))
                 throw std::runtime_error ("Couldn't write " + name.toStdString());
             written.add (f.getFullPathName());
+            saved.emplace_back (c.id, name.toStdString());
         }
-        return [this, written, folder]() {
+        return [this, written, folder, saved]() {
+            for (auto& [id, name] : saved)
+                if (auto* c = chopById (id))
+                    c->exported = name;
             lastExportFiles = written;
             lastExportFolder = folder;
+            ++exportCount;
             statusMessage = "Exported " + juce::String (written.size()) + " files.";
         };
     });

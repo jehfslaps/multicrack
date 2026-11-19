@@ -77,6 +77,10 @@ class ExportPage(QWidget):
                            "de-clicked  ·  no tags embedded", "on_dark_muted", 11, 500, 1.3))
         row = QHBoxLayout()
         row.setSpacing(12)
+        self.back = W.HwButton("Back to review", "dark", min_h=K.H_KEY)
+        self.back.setToolTip("Approve more chops and export again. Only new ones are added.")
+        self.back.clicked.connect(lambda: self.win.go(1))
+        row.addWidget(self.back)
         row.addStretch(1)
         self.again = W.HwButton("Chop another song", "dark", min_h=K.H_KEY)
         self.again.clicked.connect(self.win.start_over)
@@ -127,3 +131,5 @@ class ExportPage(QWidget):
             self.list.setItem(i, 0, QTableWidgetItem(os.path.basename(p)))
             self.list.setItem(i, 1, QTableWidgetItem(s))
         self.open.setEnabled(bool(files))
+        # chops left that weren't saved: offer to go back, approve more and export again
+        self.back.setVisible(any(not c.exported for c in getattr(self.win, "chops", None) or []))

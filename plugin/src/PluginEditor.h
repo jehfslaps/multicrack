@@ -46,8 +46,7 @@ private:
     std::unique_ptr<ExportPage> exportPage;
     int page = 0;
     bool wasBusy = false;
-    int exportsSeen = 0;
-    juce::String lastExportFolder;
+    int exportsSeen = 0;   // Session::exportCount last time we looked
     juce::TooltipWindow tooltips { this, 600 };
 };
 

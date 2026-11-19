@@ -150,7 +150,8 @@ private:
     juce::ListBox list;
     Text specs { juce::String::fromUTF8 ("24-bit WAV  ·  original sample rate  ·  normalized -0.1 dB  ·  de-clicked  ·  no tags embedded"),
                  "on_dark_muted", 11, 500, 1.3f, true };
-    HwButton again { "Chop another song", HwButton::dark }, openBtn { "Open folder", HwButton::key, "folder" };
+    HwButton again { "Chop another song", HwButton::dark }, openBtn { "Open folder", HwButton::key, "folder" },
+             back { "Back to review", HwButton::dark };
     juce::StringArray files;
 };
 

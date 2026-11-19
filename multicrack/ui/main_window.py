@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QFileDialog, QFrame, 
 from .. import APP_NAME, LEGACY_NAME
 from ..core import session, updater
 from ..core.audio import desktop_dir
+from ..core.naming import to_export
 from ..core.songs import guess_names, split_songs
 from . import logo, skin, theme
 from .skin import core as K
@@ -709,14 +710,21 @@ class MainWindow(QMainWindow):
     def export_all(self):
         if self.busy or not self.chops:
             return
-        if not all(c.approved for c in self.chops):
+        todo = to_export(self.chops)     # approved and not saved yet; the rest are skipped
+        if not todo:
             return
         folder = self.output_folder()
         stems = {s.id: s for s in self.stems}
-        self._run(Job(export, stems, list(self.chops), folder, self.prefix()),
-                  lambda files: self._exported(files, folder), "Exporting…")
+        self._run(Job(export, stems, todo, folder, self.prefix()),
+                  lambda files: self._exported(files, folder, todo), "Exporting…")
 
-    def _exported(self, files, folder):
+    def _exported(self, files, folder, todo=()):
+        for c, path in zip(todo, files):
+            c.exported = os.path.basename(path)
+        self.review_page.names_changed()
+        self.review_page.counts_changed()
+        for r in self.review_page.rows.values():
+            r.update_view()
         self._finished = True
         self.autosave()
         self.export_page.show_result(files, folder)

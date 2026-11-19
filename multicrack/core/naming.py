@@ -75,6 +75,21 @@ def assign_names(chops, prefix: str, folder: str = "") -> dict:
     return names
 
 
+def display_names(chops, prefix: str, folder: str = "") -> dict:
+    """Names as they will land in the folder: chops already saved keep the name they were saved
+    under; approved chops come next (that's what Export writes), then the rest."""
+    names = {c.id: c.exported for c in chops if getattr(c, "exported", "")}
+    pending = [c for c in chops if not getattr(c, "exported", "")]
+    order = [c for c in pending if c.approved] + [c for c in pending if not c.approved]
+    names.update(assign_names(order, prefix, folder))
+    return names
+
+
+def to_export(chops) -> list:
+    """What Export writes: approved chops that aren't in the folder yet."""
+    return [c for c in chops if c.approved and not getattr(c, "exported", "")]
+
+
 # ------------------------------------------------------------- stem file names
 _KEY_RE = re.compile(r"^[A-Ga-g](#|b|s)?(m|min|maj|minor|major|M)?$")
 _CH_RE = re.compile(r"^(l|r|left|right|lt|rt)$", re.IGNORECASE)
