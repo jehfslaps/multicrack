@@ -1,6 +1,7 @@
 // Hardware-style widgets (port of multicrack/ui/skin/widgets.py).
 #pragma once
 
+#include "ui/Motion.h"
 #include "ui/Skin.h"
 
 #include <functional>
@@ -84,9 +85,13 @@ public:
     int floorW = 0;
     float iconSize = 16.0f;
     void paintButton (juce::Graphics&, bool over, bool down) override;
+    void buttonStateChanged() override;
+    void enablementChanged() override;
 
 private:
     juce::Font textFont() const;
+    motion::Spring hv { 0, motion::FADE, this }, pv { 0, motion::PRESS, this }, cv { 0, motion::FADE, this };
+    bool seen = false;
     Variant variant;
     juce::String iconName;
     bool hasLed;
@@ -101,8 +106,11 @@ public:
     juce::String label;
     int naturalWidth() const;
     void paintButton (juce::Graphics&, bool over, bool down) override;
+    void buttonStateChanged() override { motion::move (hv, *this, isOver() ? 1 : 0); }
 
 private:
+    motion::Spring hv { 0, motion::FADE, this }, lit { 0, motion::FADE, this };
+    bool seen = false;
     bool green;
     juce::String iconName;
 };
@@ -112,7 +120,7 @@ class StepSelector : public juce::Component
 public:
     explicit StepSelector (juce::StringArray names);
     std::function<void (int)> onClick;
-    void setCurrent (int i) { current = i; repaint(); }
+    void setCurrent (int i);
     void setStepEnabled (int i, bool on) { enabled.set (i, on); repaint(); }
     void setCompact (bool c) { compact = c; repaint(); }
     int minWidth() const;
@@ -127,6 +135,7 @@ private:
     juce::Array<bool> enabled;
     int current = 0, hover = -1;
     bool compact = false;
+    std::vector<std::unique_ptr<motion::Spring>> lit, hv;
 };
 
 class LeverSwitch : public juce::Button
@@ -134,6 +143,10 @@ class LeverSwitch : public juce::Button
 public:
     LeverSwitch() : juce::Button ("theme") { setClickingTogglesState (true); }
     void paintButton (juce::Graphics&, bool over, bool down) override;
+
+private:
+    motion::Spring pos { -1, motion::UI, this };    // -1 up .. 1 down
+    bool seen = false;
 };
 
 class Lcd : public juce::Component
@@ -152,12 +165,13 @@ private:
 class LedMeter : public juce::Component
 {
 public:
-    void set (float f) { frac = juce::jlimit (0.0f, 1.0f, f); repaint(); }
+    void set (float f) { frac = juce::jlimit (0.0f, 1.0f, f); motion::move (shown, *this, frac); }
     int segments = 28;
     void paint (juce::Graphics&) override;
 
 private:
     float frac = 0;
+    motion::Spring shown { 0, motion::UI, this };
 };
 
 class Trough : public juce::Component
@@ -210,6 +224,11 @@ class ApprovePill : public juce::Button
 public:
     ApprovePill() : juce::Button ("approve") { setClickingTogglesState (true); }
     void paintButton (juce::Graphics&, bool over, bool down) override;
+
+private:
+    void buttonStateChanged() override { motion::move (hv, *this, isOver() ? 1 : 0); }
+    motion::Spring hv { 0, motion::FADE, this }, lit { 0, motion::FADE, this };
+    bool seen = false;
 };
 
 class Badge : public juce::Component
@@ -267,6 +286,38 @@ private:
     juce::String unit;
     int decimals;
     bool isAutoShown = false, started = false;
+};
+
+// A list viewport whose mouse wheel glides to a stop instead of jumping a notch at a time (quick
+// turns add up). Trackpads, which scroll smoothly by themselves, stay 1:1.
+class SmoothViewport : public juce::Viewport
+{
+public:
+    SmoothViewport() { glide.onChange = [this] (double v) { setting = true; setViewPosition (getViewPositionX(), (int) std::lround (v)); setting = false; }; }
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
+    {
+        auto* c = getViewedComponent();
+        if (w.isSmooth || c == nullptr || e.mods.isShiftDown() || e.mods.isCommandDown() || motion::reducedMotion())
+        {
+            juce::Viewport::mouseWheelMove (e, w);
+            return;
+        }
+        const double maxY = juce::jmax (0, c->getHeight() - getMaximumVisibleHeight());
+        const double base = glide.moving() ? glide.target() : (double) getViewPositionY();
+        if (! glide.moving())
+            glide.jump (getViewPositionY());
+        glide.to (juce::jlimit (0.0, maxY, base - w.deltaY * 320.0));
+    }
+    void visibleAreaChanged (const juce::Rectangle<int>& r) override
+    {
+        if (! setting)
+            glide.jump (r.getY());   // moved some other way (scrollbar, keys, code): follow it
+        juce::Viewport::visibleAreaChanged (r);
+    }
+
+private:
+    motion::Spring glide { 0, motion::SCROLL };
+    bool setting = false;
 };
 
 // ======================================================================= fields

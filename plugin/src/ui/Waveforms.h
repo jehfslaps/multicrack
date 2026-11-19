@@ -1,6 +1,8 @@
 // Edison-style waveforms: peak cache, the small list waveform and the chop view.
 #pragma once
 
+#include "ui/Motion.h"
+
 #include "engine/Model.h"
 #include "ui/Skin.h"
 
@@ -57,11 +59,11 @@ public:
     void setPlayhead (int s) { if (s != playhead) { playhead = s; repaint(); } }
     void paint (juce::Graphics&) override;
 
-    // view
-    void setView (int a, int b);
+    // view (glide = animate; drags and following the playhead are direct)
+    void setView (int a, int b, bool glide = false);
     void zoom (double factor, int centre = -1);
-    void showChop();
-    void showAll() { setView (0, n); }
+    void showChop (bool glide = true);
+    void showAll() { setView (0, n, true); }
     bool isWhole() const { return viewA <= 0 && viewB >= n; }
     int viewStart() const { return viewA; }
     int viewEnd() const { return viewB; }
@@ -94,6 +96,9 @@ private:
     int n = 0, sr = 44100, start = 0, end = 0, viewA = 0, viewB = 0, playhead = -1;
     int fadeIn = 0, fadeOut = 0;
     bool reverse = false, hoverHandle = false;
+    motion::Spring va { 0, motion::SCROLL }, vb { 0, motion::SCROLL };
+    void glided();
+    std::pair<int, int> heading() const;
     Drag drag = None;
     bool newStarted = false;
     int anchor = 0, a0 = 0, b0 = 0;

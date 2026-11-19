@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QLayou
 from ..core.audio import default_fades_ms, render_chop, write_wav24
 from ..core.naming import display_names, to_export
 from ..core import engines
+from . import motion as M
+from .motion import SmoothWheel
 from ..core.model import Chop
 from .common import label_combo, magnet_to_hit
 from .skin import core as K
@@ -120,6 +122,8 @@ class ChopRow(QFrame):
         self._press = None
         self._hover = False
         self.selected = False
+        self._sel = M.Spring(0, M.FADE, self)      # selection fades in / out
+        self._hv = M.Spring(0, M.FADE, self)
         self.setAttribute(Qt.WA_Hover)
         self.setFixedHeight(60)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -179,20 +183,27 @@ class ChopRow(QFrame):
     # ---- painting
     def enterEvent(self, e):
         self._hover = True
-        self.update()
+        self._hv.to(1)
 
     def leaveEvent(self, e):
         self._hover = False
-        self.update()
+        self._hv.to(0)
 
     def paintEvent(self, _e):
         p = QPainter(self)
         r = QRectF(self.rect())
-        if self.selected:
-            p.fillRect(r, K.C("row_sel"))
-            p.fillRect(QRectF(0, 0, 4, r.height()), K.C("red_hi"))
-        elif self._hover:
+        sel = max(0.0, min(1.0, self._sel.value))
+        hov = max(0.0, min(1.0, self._hv.value)) * (1 - sel)
+        if hov > 0.003:
+            p.setOpacity(hov)
             p.fillRect(r, K.C("row_hover"))
+        if sel > 0.003:
+            p.setOpacity(sel)
+            p.fillRect(r, K.C("row_sel"))
+            # the red edge grows from the middle as the row is selected
+            h = r.height() * (0.35 + 0.65 * sel)
+            p.fillRect(QRectF(0, (r.height() - h) / 2, 4, h), K.C("red_hi"))
+        p.setOpacity(1.0)
         p.setPen(QPen(K.C("row_line"), 1))
         p.drawLine(QPointF(8, r.height() - 0.5), QPointF(r.width() - 8, r.height() - 0.5))
 
@@ -256,7 +267,7 @@ class ChopRow(QFrame):
 
     def set_selected(self, on):
         self.selected = on
-        self.update()
+        M.move(self._sel, self, 1 if on else 0)
 
 
 class ReviewPage(QWidget):
@@ -444,6 +455,7 @@ class ReviewPage(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._wheel = SmoothWheel(self.scroll, step=150)
         self.listw = QWidget()
         self.list_lay = QVBoxLayout(self.listw)
         self.list_lay.setSizeConstraint(QLayout.SetMinimumSize)

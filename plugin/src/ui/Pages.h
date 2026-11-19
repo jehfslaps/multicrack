@@ -61,7 +61,7 @@ private:
         browseFolderBtn { "Browse folder", HwButton::dark, "folder", false, 12.5f };
     Outline stemsOutline;
     juce::OwnedArray<Text> heads;
-    juce::Viewport viewport;
+    SmoothViewport viewport;
     juce::Component rowsHolder;
     juce::OwnedArray<StemRow> rows;
     Text empty { juce::String::fromUTF8 ("NO FILES YET  ·  DROP A STEM FOLDER ABOVE TO GET STARTED"), "on_dark_dim", 12.5f, 500, 2.0f };
@@ -135,7 +135,7 @@ private:
     ValueBox fadeIn { "Fade in", 0, 5000, " ms", 1, 3.2 }, fadeOut { "Fade out", 0, 10000, " ms", 1, 3.2 }, gain { "Gain", -48, 0, " dB", 1 };
     HwButton dragBtn { "Drag into your DAW", HwButton::dark, "drag", false, 11.5f };
     juce::OwnedArray<Text> cols;
-    juce::Viewport viewport;
+    SmoothViewport viewport;
     juce::Component rowsHolder;
     juce::OwnedArray<juce::Component> rows;       // GroupRow and ChopRow in order
     std::map<int, ChopRow*> rowById;

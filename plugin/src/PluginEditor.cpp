@@ -3,6 +3,80 @@
 namespace xk::ui
 {
 
+// ------------------------------------------------------------------ page fade
+void PageFade::start (juce::Component& leaving, juce::Component& arriving, float direction)
+{
+    const float scale = juce::jmax (1.0f, juce::Component::getApproximateScaleFactorForComponent (&leaving));
+    Layer l;
+    l.img = leaving.createComponentSnapshot (leaving.getLocalBounds(), true, scale);
+    // the page we were heading to is caught mid-fade: it leaves from the opacity it has now
+    const double from = (live != nullptr && live.getComponent() == &leaving) ? juce::jlimit (0.0, 1.0, liveAlpha.get()) : 1.0;
+    l.alpha = std::make_unique<motion::Spring> (from, motion::Preset { 0.55, 1.0 });
+    l.offset = std::make_unique<motion::Spring> (0.0, motion::UI);
+    l.alpha->onChange = l.offset->onChange = [this] (double) { tick(); };
+    l.source = &leaving;
+    l.alpha->to (0.0);
+    l.offset->to (-direction * 26.0);
+    // going back to a page that is still drifting away: bring its picture back into line with
+    // the real page as it fades, instead of leaving a double image
+    for (auto& old : layers)
+        if (old.source == &arriving)
+            old.offset->to (0.0);
+    layers.push_back (std::move (l));
+    if (layers.size() > 3)
+        layers.erase (layers.begin());
+    if (live != nullptr && live.getComponent() != &arriving)
+        live->setAlpha (1.0f);
+    live = &arriving;
+    liveAlpha.onChange = [this] (double v) {
+        if (live != nullptr)
+            live->setAlpha ((float) juce::jlimit (0.0, 1.0, v));
+        tick();
+    };
+    liveAlpha.jump (0.0);
+    liveAlpha.to (1.0);
+    setVisible (true);
+    repaint();
+}
+
+void PageFade::tick()
+{
+    repaint();
+    bool any = liveAlpha.moving();
+    for (auto& l : layers)
+        any = any || l.alpha->moving() || l.offset->moving();
+    if (! any)
+    {
+        juce::MessageManager::callAsync ([sp = juce::Component::SafePointer<PageFade> (this)] {
+            if (sp == nullptr)
+                return;
+            bool still = sp->liveAlpha.moving();
+            for (auto& l : sp->layers)
+                still = still || l.alpha->moving();
+            if (! still)
+            {
+                sp->layers.clear();
+                if (sp->live != nullptr)
+                    sp->live->setAlpha (1.0f);
+                sp->setVisible (false);
+            }
+        });
+    }
+}
+
+void PageFade::paint (juce::Graphics& g)
+{
+    for (auto& l : layers)
+    {
+        const float a = juce::jlimit (0.0f, 1.0f, l.alpha->getf());
+        if (a > 0.002f)
+        {
+            g.setOpacity (a);
+            g.drawImage (l.img, getLocalBounds().toFloat().translated (l.offset->getf(), 0));
+        }
+    }
+}
+
 MainView::MainView (Session& s) : session (s)
 {
     applyTheme (session.settings().get ("theme", "light") == "dark");
@@ -29,6 +103,7 @@ MainView::MainView (Session& s) : session (s)
     loadPage = std::make_unique<LoadPage> (ctx, *this);
     reviewPage = std::make_unique<ReviewPage> (ctx);
     exportPage = std::make_unique<ExportPage> (ctx);
+    addChildComponent (fade);          // behind the pages: the page you leave fades out under the new one
     addChildComponent (*loadPage);
     addChildComponent (*reviewPage);
     addChildComponent (*exportPage);
@@ -55,6 +130,9 @@ void MainView::applyTheme (bool dark)
 
 void MainView::go (int p)
 {
+    juce::Component* pages[] = { loadPage.get(), reviewPage.get(), exportPage.get() };
+    if (p != page && isShowing() && ! motion::reducedMotion() && pages[page]->isVisible() && pages[page]->getWidth() > 0)
+        fade.start (*pages[page], *pages[p], p > page ? 1.0f : -1.0f);
     page = p;
     loadPage->setVisible (p == 0);
     reviewPage->setVisible (p == 1);
@@ -194,6 +272,7 @@ void MainView::resized()
     lcd.setBounds (top);
     for (auto* p : std::initializer_list<juce::Component*> { loadPage.get(), reviewPage.get(), exportPage.get() })
         p->setBounds (r);
+    fade.setBounds (r);
 }
 
 } // namespace xk::ui

@@ -153,7 +153,7 @@ void ChopView::set (std::shared_ptr<PeakCache> c, int n_, int sr_, int s, int e,
     if (keepView && same && viewB > viewA)
         repaint();
     else
-        showChop();
+        showChop (same && viewB > viewA);   // another chop of the same stem: glide over to it
 }
 
 void ChopView::setFx (int fi, int fo, bool rev)
@@ -167,19 +167,51 @@ void ChopView::setFx (int fi, int fo, bool rev)
     }
 }
 
-void ChopView::showChop()
+void ChopView::showChop (bool glide)
 {
     const int len = juce::jmax (1, end - start);
     const int pad = juce::jmax ((int) (0.25 * len), (int) (0.12 * sr));
-    setView (start - pad, end + pad);
+    setView (start - pad, end + pad, glide);
 }
 
-void ChopView::setView (int a, int b)
+std::pair<int, int> ChopView::heading() const
+{
+    if (va.moving() || vb.moving())
+        return { (int) va.target(), (int) vb.target() };
+    return { viewA, viewB };
+}
+
+void ChopView::setView (int a, int b, bool glide)
 {
     const int span = juce::jmin (n, juce::jmax ((int) (0.01 * sr), b - a));
     a = juce::jmax (0, juce::jmin (n - span, a));
+    if (glide && isShowing() && viewB > viewA)
+    {
+        if (! va.moving() && ! vb.moving())
+        {
+            va.jump (viewA);
+            vb.jump (viewB);
+        }
+        va.onChange = vb.onChange = [this] (double) { glided(); };
+        va.to (a);
+        vb.to (a + span);
+        return;
+    }
+    va.onChange = vb.onChange = nullptr;
+    va.jump (a);      // stops any glide
+    vb.jump (a + span);
     viewA = a;
     viewB = a + span;
+    repaint();
+}
+
+void ChopView::glided()
+{
+    const int a = (int) std::lround (va.get()), b = (int) std::lround (vb.get());
+    if (b - a < 2)
+        return;
+    viewA = juce::jmax (0, juce::jmin (n - (b - a), a));
+    viewB = juce::jmin (n, viewA + (b - a));
     repaint();
 }
 
@@ -187,12 +219,13 @@ void ChopView::zoom (double factor, int centre)
 {
     if (! cache)
         return;
-    const int span = viewB - viewA;
+    const auto [a0, b0] = heading();      // quick wheel turns add up
+    const int span = b0 - a0;
     if (centre < 0)
-        centre = viewA + span / 2;
+        centre = a0 + span / 2;
     const double ns = span * factor;
-    const double a = centre - (centre - viewA) * ns / juce::jmax (1, span);
-    setView ((int) a, (int) (a + ns));
+    const double a = centre - (centre - a0) * ns / juce::jmax (1, span);
+    setView ((int) a, (int) (a + ns), true);
 }
 
 juce::Rectangle<float> ChopView::area() const
@@ -380,9 +413,10 @@ void ChopView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
     if (e.mods.isShiftDown() || std::abs (dx) > std::abs (dy))
     {
         const float d = dx != 0 ? dx : dy;
-        const int span = viewB - viewA;
+        const auto [a0, b0] = heading();
+        const int span = b0 - a0;
         const int shift = (int) (-d * span * 0.6f);
-        setView (viewA + shift, viewB + shift);
+        setView (a0 + shift, b0 + shift, ! w.isSmooth);
     }
     else if (dy != 0)
         zoom (dy > 0 ? 0.8 : 1.25, juce::jlimit (0, n, sOf (e.position.x)));

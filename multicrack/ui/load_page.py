@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QHBoxL
 from ..core.audio import AUDIO_EXTS
 from ..core.model import KIND_NAMES
 from ..core.naming import folder_name, make_prefix
+from .motion import SmoothWheel
 from .common import fmt_len
 from .skin import core as K
 from .skin import widgets as W
@@ -36,6 +37,8 @@ def _table(columns, widths, stretch_col):
     t.verticalHeader().setDefaultSectionSize(44)
     t.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     t.setFont(K.font(13.5, 400, 0.3))
+    t.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+    t._wheel = SmoothWheel(t, step=132)
     return t
 
 

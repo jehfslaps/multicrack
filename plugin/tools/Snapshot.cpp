@@ -26,8 +26,10 @@ static bool waitIdle (xk::Session& s, int timeoutMs = 600000)
     return true;
 }
 
-static void save (juce::Component& c, const juce::File& f)
+static void save (juce::Component& c, const juce::File& f, bool settle = true)
 {
+    if (settle)
+        pump (900);   // let any motion settle first
     auto img = c.createComponentSnapshot (c.getLocalBounds(), true, 1.0f);
     f.deleteFile();
     juce::FileOutputStream out (f);
@@ -233,6 +235,41 @@ int main (int argc, char** argv)
     editor->getView().go (1);
     pump (100);
     save (*editor, outDir.getChildFile ("6_review_small.png"));
+    // ---- motion: a spring reversed halfway carries on from where it is (no jump)
+    {
+        xk::ui::motion::Spring sp (0.0, xk::ui::motion::UI);
+        sp.to (1.0);
+        pump (120);
+        const double mid = sp.get();
+        sp.to (0.0);
+        pump (10);
+        std::printf ("spring: reversed at %.3f, next frame %.3f\n", mid, sp.get());
+        if (mid <= 0.05 || mid >= 0.999 || std::abs (sp.get() - mid) > 0.08)
+            return fail ("spring jumped when reversed");
+        pump (1500);
+        if (sp.moving() || std::abs (sp.get()) > 1e-6)
+            return fail ("spring did not settle");
+    }
+    // ---- page change mid-way, then interrupted (on screen, so the motion really runs)
+    {
+        auto& mv = editor->getView();
+        editor->addToDesktop (0);
+        editor->setVisible (true);
+        mv.go (1);
+        pump (900);
+        mv.go (2);
+        pump (60);
+        std::printf ("page fade: 60 ms in, export page alpha %.2f\n", mv.exportAlpha());
+        save (*editor, outDir.getChildFile ("8_page_fade_mid.png"), false);
+        mv.go (1);   // interrupt
+        pump (40);
+        save (*editor, outDir.getChildFile ("8_page_fade_interrupted.png"), false);
+        pump (1200);
+        if (mv.review().getAlpha() < 0.999f)
+            return fail ("page did not finish fading in");
+        editor->removeFromDesktop();
+        std::printf ("page fade: settled, page alpha %.3f\n", mv.review().getAlpha());
+    }
     editor->setUiSize ("medium");
     s.lastExportFolder.deleteRecursively();
     ed.reset();

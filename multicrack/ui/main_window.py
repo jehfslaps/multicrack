@@ -419,7 +419,10 @@ class MainWindow(QMainWindow):
                                    else False)
 
     def go(self, i):
-        self.stack.setCurrentIndex(i)
+        if not hasattr(self, "_pages_fader"):
+            from .motion import PageFader
+            self._pages_fader = PageFader(self.stack)
+        self._pages_fader.go(i)
         self.steps_sel.set_current(i)
         self.chassis.update()
         if i == 1:

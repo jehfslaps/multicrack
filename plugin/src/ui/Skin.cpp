@@ -372,6 +372,20 @@ void cornerScrews (juce::Graphics& g, juce::Rectangle<float> r, float inset, flo
     screw (g, { r.getRight() - inset, r.getBottom() - inset }, rad);
 }
 
+void ledMix (juce::Graphics& g, juce::Point<float> c, float r, juce::Colour col, float amount, bool glow, float glowScale)
+{
+    amount = juce::jlimit (0.0f, 1.0f, amount);
+    if (amount < 0.999f)
+        led (g, c, r, col, false, glow, glowScale);
+    if (amount > 0.003f)
+    {
+        juce::Graphics::ScopedSaveState ss (g);
+        g.beginTransparencyLayer (amount);
+        led (g, c, r, col, true, glow, glowScale);
+        g.endTransparencyLayer();
+    }
+}
+
 void led (juce::Graphics& g, juce::Point<float> c, float r, juce::Colour col, bool on, bool glow, float glowScale)
 {
     juce::ColourGradient bz (juce::Colour (0xff4a4c50), c.x, c.y - r * 0.4f, juce::Colour (0xff0b0b0c), c.x, c.y - r * 0.4f + r * 2.0f, true);

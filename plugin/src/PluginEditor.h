@@ -8,6 +8,28 @@
 namespace xk::ui
 {
 
+// Page changes: the new page fades in on top while the page you leave drifts a little the other
+// way underneath and fades out behind it. Interrupting carries on from what's on screen.
+class PageFade : public juce::Component
+{
+public:
+    PageFade() { setInterceptsMouseClicks (false, false); }
+    void start (juce::Component& leaving, juce::Component& arriving, float direction);
+    void paint (juce::Graphics&) override;
+
+private:
+    struct Layer
+    {
+        juce::Image img;
+        std::unique_ptr<motion::Spring> alpha, offset;
+        juce::Component* source = nullptr;
+    };
+    void tick();
+    std::vector<Layer> layers;
+    juce::Component::SafePointer<juce::Component> live;
+    motion::Spring liveAlpha { 1.0, { 0.30, 1.0 } };
+};
+
 class MainView : public Chassis, private juce::ChangeListener, private juce::Timer
 {
 public:
@@ -19,6 +41,7 @@ public:
     // used by the snapshot / test tool
     ReviewPage& review() { return *reviewPage; }
     int currentPage() const { return page; }
+    float exportAlpha() const { return exportPage->getAlpha(); }
     void setTheme (bool dark) { lever.setToggleState (dark, juce::sendNotification); applyTheme (dark); }
     static constexpr int MIN_W = 1000, MIN_H = 660, FULL_W = 1300, SHORT_H = 820;
 
@@ -47,6 +70,7 @@ private:
     int page = 0;
     bool wasBusy = false;
     int exportsSeen = 0;   // Session::exportCount last time we looked
+    PageFade fade;
     juce::TooltipWindow tooltips { this, 600 };
 };
 

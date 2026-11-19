@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QDoubleSpinBox
 
 from . import core as K
 from .core import C
+from .. import motion as M
+from ..motion import Spring, mix, mix_color
 
 
 def _dpr(w: QWidget) -> float:
@@ -321,6 +323,12 @@ class HwButton(QAbstractButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
         self._hover = False
+        self._hv = Spring(0, M.FADE, self)          # hover glow
+        self._pv = Spring(0, M.PRESS, self)         # how far down the key is
+        self._cv = Spring(1 if checkable and self.isChecked() else 0, M.FADE, self)
+        self.pressed.connect(lambda: self._pv.to(1))
+        self.released.connect(lambda: self._pv.to(0))
+        self.toggled.connect(lambda on: M.move(self._cv, self, 1 if on else 0))
         self.setAttribute(Qt.WA_Hover)
         if variant in ("danger", "icon", "round"):
             self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -368,37 +376,43 @@ class HwButton(QAbstractButton):
 
     def enterEvent(self, e):
         self._hover = True
-        self.update()
+        self._hv.to(1)
         super().enterEvent(e)
 
     def leaveEvent(self, e):
         self._hover = False
-        self.update()
+        self._hv.to(0)
         super().leaveEvent(e)
+
+    def changeEvent(self, e):
+        super().changeEvent(e)
+        if not self.isEnabled():
+            self._hover = False
+            self._hv.jump(0)
+            self._pv.jump(0)
 
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -2.5)
-        down = self.isDown()
+        pv = max(0.0, min(1.2, self._pv.value))     # 0 up .. 1 down
+        hv = max(0.0, min(1.0, self._hv.value))     # hover
+        down = pv > 0.5
         en = self.isEnabled()
         v = self.variant
         checked = self.isChecked()
-        if down:
-            r.translate(0, 1)
+        r.translate(0, pv)
         txt_color = C("on_dark")
         icon_color = C("on_dark")
         if v in ("key", "seg") and not (v == "seg" and checked):
             if en:
-                K.soft_shadow(p, r, 4, 3 if down else 5, 90, 0.8 if down else 2.2)
+                K.soft_shadow(p, r, 4, mix(5, 3, pv), 90, mix(2.2, 0.8, pv))
                 g = QLinearGradient(r.topLeft(), r.bottomLeft())
                 top = QColor(K.pal()["key_hi"])
                 mid = QColor(K.pal()["key"])
                 bot = QColor(K.pal()["key_lo"])
-                if self._hover:
-                    top, mid = top.lighter(103), mid.lighter(104)
-                if down:
-                    top, mid = mid.darker(104), mid.darker(106)
+                top, mid = mix_color(top, top.lighter(103), hv), mix_color(mid, mid.lighter(104), hv)
+                top, mid = mix_color(top, mid.darker(104), pv), mix_color(mid, mid.darker(106), pv)
                 g.setColorAt(0, top)
                 g.setColorAt(0.55, mid)
                 g.setColorAt(1, bot)
@@ -418,7 +432,7 @@ class HwButton(QAbstractButton):
         elif v == "seg" and checked or v == "red":
             if en:
                 gl = QRadialGradient(r.center(), r.width() * 0.7)
-                gl.setColorAt(0, QColor(255, 70, 50, 70 if (v == "seg" or self._hover) else 40))
+                gl.setColorAt(0, QColor(255, 70, 50, 70 if v == "seg" else round(mix(40, 70, hv))))
                 gl.setColorAt(1, QColor(255, 70, 50, 0))
                 p.setPen(Qt.NoPen)
                 p.setBrush(gl)
@@ -428,10 +442,8 @@ class HwButton(QAbstractButton):
                 hi = QColor(K.pal()["red_hi"])
                 mid = QColor(K.pal()["red"])
                 lo = QColor(K.pal()["red_lo"])
-                if self._hover:
-                    hi, mid = hi.lighter(108), mid.lighter(108)
-                if down:
-                    hi, mid = mid, mid.darker(110)
+                hi, mid = mix_color(hi, hi.lighter(108), hv), mix_color(mid, mid.lighter(108), hv)
+                hi, mid = mix_color(hi, mid, pv), mix_color(mid, mid.darker(110), pv)
                 g.setColorAt(0, hi)
                 g.setColorAt(0.6, mid)
                 g.setColorAt(1, lo)
@@ -448,7 +460,7 @@ class HwButton(QAbstractButton):
                 txt_color = icon_color = QColor("#85827C")
         elif v == "danger":
             col = C("warn") if en else QColor("#5A5A5A")
-            p.setBrush(QColor(232, 100, 78, 40 if self._hover else 14) if en else Qt.NoBrush)
+            p.setBrush(QColor(232, 100, 78, round(mix(14, 40, hv))) if en else Qt.NoBrush)
             p.setPen(QPen(col, 1.2))
             p.drawRoundedRect(r, 3, 3)
             K.draw_icon(p, "x", r.adjusted(7, 7, -7, -7), col, 1.8)
@@ -458,10 +470,10 @@ class HwButton(QAbstractButton):
             rad = min(r.width(), r.height()) / 2
             K.soft_shadow(p, QRectF(c.x() - rad, c.y() - rad, 2 * rad, 2 * rad), rad, 3, 80, 1.5)
             g = QRadialGradient(QPointF(c.x(), c.y() - rad * 0.5), rad * 1.6)
-            g.setColorAt(0, QColor("#3A3C40") if not self._hover else QColor("#46494E"))
+            g.setColorAt(0, mix_color("#3A3C40", "#46494E", hv))
             g.setColorAt(1, QColor("#121314"))
             p.setBrush(g)
-            p.setPen(QPen(QColor("#C9C4BA") if self._hover else QColor("#8E8A83"), 1.5))
+            p.setPen(QPen(mix_color("#8E8A83", "#C9C4BA", hv), 1.5))
             p.drawEllipse(c, rad - 1, rad - 1)
             K.draw_icon(p, self.icon_name or "play",
                         QRectF(c.x() - rad * 0.55 + 1, c.y() - rad * 0.55, rad * 1.1, rad * 1.1),
@@ -469,16 +481,12 @@ class HwButton(QAbstractButton):
             return
         else:   # dark / icon
             g = QLinearGradient(r.topLeft(), r.bottomLeft())
-            g.setColorAt(0, QColor("#24262A") if not self._hover else QColor("#2C2F33"))
+            g.setColorAt(0, mix_color(mix_color("#24262A", "#2C2F33", hv), "#141516", pv))
             g.setColorAt(1, QColor("#17181A"))
-            if down:
-                g.setColorAt(0, QColor("#141516"))
             p.setBrush(g)
-            border = QColor("#8A867F") if en else QColor("#45474B")
-            if self._hover and en:
-                border = QColor("#D9D4CA")
-            if checked:
-                border = C("red_hi")
+            border = mix_color("#8A867F", "#D9D4CA", hv) if en else QColor("#45474B")
+            if self.isCheckable():
+                border = mix_color(border, C("red_hi"), self._cv.value)
             p.setPen(QPen(border, 1.1))
             p.drawRoundedRect(r, 3.5, 3.5)
             txt_color = icon_color = C("on_dark") if en else QColor("#6D6A65")
@@ -523,6 +531,15 @@ class LedToggle(QAbstractButton):
         self.setFocusPolicy(Qt.NoFocus)
         self.setAttribute(Qt.WA_Hover)
         self._hover = False
+        self._hv = Spring(0, M.FADE, self)
+        self._on = Spring(0, M.FADE, self)        # the LED fades on / off
+        self.toggled.connect(lambda on: M.move(self._on, self, 1 if on else 0))
+
+    def setChecked(self, on):
+        was = self.signalsBlocked()
+        super().setChecked(on)
+        if was:                                   # set without signals: still fade the LED
+            M.move(self._on, self, 1 if on else 0)
 
     def sizeHint(self):
         from PySide6.QtGui import QFontMetricsF
@@ -537,11 +554,11 @@ class LedToggle(QAbstractButton):
 
     def enterEvent(self, e):
         self._hover = True
-        self.update()
+        self._hv.to(1)
 
     def leaveEvent(self, e):
         self._hover = False
-        self.update()
+        self._hv.to(0)
 
     def paintEvent(self, _e):
         p = QPainter(self)
@@ -549,18 +566,19 @@ class LedToggle(QAbstractButton):
         r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
         en = self.isEnabled()
         on = self.isChecked() and en
+        lit = max(0.0, min(1.0, self._on.value)) if en else 0.0
         g = QLinearGradient(r.topLeft(), r.bottomLeft())
-        g.setColorAt(0, QColor("#2C2E32") if self._hover and en else QColor("#26282B"))
+        g.setColorAt(0, mix_color("#26282B", "#2C2E32", self._hv.value if en else 0))
         g.setColorAt(1, QColor("#1C1D20"))
         p.setBrush(g)
         p.setPen(QPen(QColor("#4A4D52") if en else QColor("#36383C"), 1))
         p.drawRoundedRect(r, 4, 4)
         col = K.pal()["led_green"] if self.color == "green" else K.pal()["led_red"]
-        K.led(p, QPointF(r.left() + 17, r.center().y()), 5.2, col, on)
+        K.led_mix(p, QPointF(r.left() + 17, r.center().y()), 5.2, col, lit)
         x = r.left() + 32
         if self.icon_name:
             K.draw_icon(p, self.icon_name, QRectF(x, r.center().y() - 9, 18, 18),
-                        QColor(col) if on else C("on_dark_muted"), 1.7)
+                        mix_color(C("on_dark_muted"), col, lit), 1.7)
             x += 26
         f = K.font(12, 600, 1.4, caps=True)
         p.setFont(f)
@@ -585,6 +603,8 @@ class StepSelector(QWidget):
         self.current = 0
         self.enabled = [True] * len(names)
         self._hover = -1
+        self._lit = [Spring(1 if i == 0 else 0, M.FADE, self) for i in range(len(names))]
+        self._hv = [Spring(0, M.FADE, self) for _ in names]
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumHeight(48)
@@ -595,6 +615,8 @@ class StepSelector(QWidget):
 
     def set_current(self, i):
         self.current = i
+        for k, sp in enumerate(self._lit):
+            M.move(sp, self, 1 if k == i else 0)
         self.update()
 
     def set_enabled(self, i, on):
@@ -610,11 +632,13 @@ class StepSelector(QWidget):
         h = next((i for i, c in enumerate(self._cells()) if c.contains(e.position())), -1)
         if h != self._hover:
             self._hover = h
-            self.update()
+            for k, sp in enumerate(self._hv):
+                sp.to(1 if k == h else 0)
 
     def leaveEvent(self, e):
         self._hover = -1
-        self.update()
+        for sp in self._hv:
+            sp.to(0)
 
     def mousePressEvent(self, e):
         for i, c in enumerate(self._cells()):
@@ -634,7 +658,7 @@ class StepSelector(QWidget):
             active = i == self.current
             en = self.enabled[i]
             g = QLinearGradient(c.topLeft(), c.bottomLeft())
-            base = QColor("#2A2C30") if (self._hover == i and en) else QColor("#232528")
+            base = mix_color("#232528", "#2A2C30", self._hv[i].value if en else 0)
             g.setColorAt(0, base.lighter(112) if not active else QColor("#1C1D20"))
             g.setColorAt(1, QColor("#17181A"))
             p.setBrush(g)
@@ -643,7 +667,7 @@ class StepSelector(QWidget):
             if not active:
                 p.setPen(QPen(QColor(255, 255, 255, 18), 1))
                 p.drawLine(QPointF(c.left() + 3, c.top() + 1.3), QPointF(c.right() - 3, c.top() + 1.3))
-            K.led(p, QPointF(c.left() + 18, c.center().y()), 5.5, K.pal()["led_red"], active)
+            K.led_mix(p, QPointF(c.left() + 18, c.center().y()), 5.5, K.pal()["led_red"], self._lit[i].value)
             num, _, name = self.names[i].partition(" ")
             f = K.font(12, 600 if active else 500, 1.6)
             p.setFont(f)
@@ -666,6 +690,14 @@ class LeverSwitch(QAbstractButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
         self.setFixedSize(132, 52)
+        self._pos = Spring(0, M.UI, self)           # -1 up .. 1 down
+        self._pos.jump(-1)
+        self.toggled.connect(lambda on: M.move(self._pos, self, 1 if on else -1))
+
+    def setChecked(self, on):
+        super().setChecked(on)
+        if self.signalsBlocked():
+            M.move(self._pos, self, 1 if on else -1)
 
     def paintEvent(self, _e):
         p = QPainter(self)
@@ -689,7 +721,7 @@ class LeverSwitch(QAbstractButton):
         p.drawEllipse(c, 4.5, 4.5)
         # bat handle
         down = self.isChecked()
-        tip = QPointF(c.x() + 2, c.y() + (15 if down else -15))
+        tip = QPointF(c.x() + 2, c.y() + 15 * max(-1.15, min(1.15, self._pos.value)))
         p.setPen(QPen(QColor(0, 0, 0, 90), 6.5, Qt.SolidLine, Qt.RoundCap))
         p.drawLine(QPointF(c.x() + 1, c.y() + 1.5), QPointF(tip.x() + 1, tip.y() + 1.5))
         lg = QLinearGradient(QPointF(c.x() - 3, 0), QPointF(c.x() + 4, 0))
@@ -705,10 +737,11 @@ class LeverSwitch(QAbstractButton):
         p.setBrush(tg)
         p.drawEllipse(tip, 4.3, 4.3)
         f = K.font(11.5, 600, 1.6)
+        t = max(0.0, min(1.0, (self._pos.value + 1) / 2))
         K.text(p, QRectF(r.left() + 52, r.top() + 4, 80, r.height() / 2 - 4), self.up, f,
-               C("on_dark") if not down else C("on_dark_dim"))
+               mix_color(C("on_dark"), C("on_dark_dim"), t))
         K.text(p, QRectF(r.left() + 52, r.center().y(), 80, r.height() / 2 - 4), self.down, f,
-               C("on_dark") if down else C("on_dark_dim"))
+               mix_color(C("on_dark_dim"), C("on_dark"), t))
 
 
 class Lcd(QWidget):
@@ -776,6 +809,8 @@ class Knob(QWidget):
         self.size_ = size
         self.curve = curve           # >1 gives finer control near lo
         self._drag = None
+        self._shown = Spring(0, M.UI, self)   # the pointer glides; dragging it stays 1:1
+        self._shown.jump(self._frac())
         self.setFixedSize(size + pad, size + pad)
         self.setCursor(Qt.SizeVerCursor)
         self.setToolTip("Drag up/down (Shift = fine), scroll, double-click to reset")
@@ -799,7 +834,10 @@ class Knob(QWidget):
         if abs(v - self._v) < 1e-9:
             return
         self._v = v
-        self.update()
+        if self._drag is not None or not self.isVisible():
+            self._shown.jump(self._frac())
+        else:
+            self._shown.to(self._frac())
         if emit:
             self.valueChanged.emit(v)
 
@@ -832,7 +870,7 @@ class Knob(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         c = QPointF(self.width() / 2, self.height() / 2)
-        K.draw_knob(p, c, self.size_, self._frac(), _dpr(self))
+        K.draw_knob(p, c, self.size_, max(0.0, min(1.0, self._shown.value)), _dpr(self))
 
 
 class LcdSpin(QDoubleSpinBox):
@@ -918,12 +956,13 @@ class LedMeter(QWidget):
         super().__init__(parent)
         self.segments = segments
         self.frac = 0.0
+        self._f = Spring(0, M.UI, self)
         self.setMinimumSize(240, 30)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def set(self, frac):
         self.frac = max(0.0, min(1.0, frac))
-        self.update()
+        M.move(self._f, self, self.frac)
 
     def paintEvent(self, _e):
         p = QPainter(self)
@@ -939,11 +978,19 @@ class LedMeter(QWidget):
         n = self.segments
         gap = 2.5
         w = (inner.width() - gap * (n - 1)) / n
-        lit = int(round(self.frac * n)) if self.frac < 1 else n
+        f = max(0.0, min(1.0, self._f.value))
+        lit_f = f * n if self.frac < 1 or f < 0.999 else n
         on = QColor(K.pal()["led_green"])
         for i in range(n):
             seg = QRectF(inner.left() + i * (w + gap), inner.top(), w, inner.height())
-            if i < lit:
+            a = max(0.0, min(1.0, lit_f - i + 0.5))   # the edge segment fades in
+            if a < 1:
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(40, 70, 50, 120))
+                p.drawRoundedRect(seg, 1.5, 1.5)
+            if a > 0:
+                p.save()
+                p.setOpacity(a)
                 gl = QColor(on)
                 gl.setAlpha(60)
                 p.setPen(Qt.NoPen)
@@ -953,10 +1000,8 @@ class LedMeter(QWidget):
                 g.setColorAt(0, on.lighter(140))
                 g.setColorAt(1, on.darker(110))
                 p.setBrush(g)
-            else:
-                p.setPen(Qt.NoPen)
-                p.setBrush(QColor(40, 70, 50, 120))
-            p.drawRoundedRect(seg, 1.5, 1.5)
+                p.drawRoundedRect(seg, 1.5, 1.5)
+                p.restore()
 
 
 class Trough(QWidget):
@@ -1146,30 +1191,39 @@ class ApprovePill(QAbstractButton):
         self.px = 11.5 if width >= 130 else 10.5
         self.setAttribute(Qt.WA_Hover)
         self._hover = False
+        self._hv = Spring(0, M.FADE, self)
+        self._on = Spring(0, M.FADE, self)
+        self.toggled.connect(lambda on: M.move(self._on, self, 1 if on else 0))
+
+    def setChecked(self, on):
+        super().setChecked(on)
+        if self.signalsBlocked():
+            M.move(self._on, self, 1 if on else 0)
 
     def enterEvent(self, e):
         self._hover = True
-        self.update()
+        self._hv.to(1)
 
     def leaveEvent(self, e):
         self._hover = False
-        self.update()
+        self._hv.to(0)
 
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect()).adjusted(1, 2, -1, -2)
         on = self.isChecked()
+        lit = max(0.0, min(1.0, self._on.value))
         g = QLinearGradient(r.topLeft(), r.bottomLeft())
-        g.setColorAt(0, QColor("#2A2C30") if self._hover else QColor("#232528"))
+        g.setColorAt(0, mix_color("#232528", "#2A2C30", self._hv.value))
         g.setColorAt(1, QColor("#18191B"))
         p.setBrush(g)
-        p.setPen(QPen(QColor(75, 224, 122, 140) if on else QColor("#45484D"), 1))
+        p.setPen(QPen(mix_color("#45484D", QColor(75, 224, 122, 140), lit), 1))
         p.drawRoundedRect(r, 4, 4)
-        K.led(p, QPointF(r.left() + 15, r.center().y()), 4.8, K.pal()["led_green"], on)
-        col = C("on_dark") if on else C("on_dark_muted")
+        K.led_mix(p, QPointF(r.left() + 15, r.center().y()), 4.8, K.pal()["led_green"], lit)
+        col = mix_color(C("on_dark_muted"), C("on_dark"), lit)
         K.draw_icon(p, "check", QRectF(r.left() + 28, r.center().y() - 8, 16, 16),
-                    QColor(K.pal()["led_green"]) if on else col, 2.0)
+                    mix_color(col, K.pal()["led_green"], lit), 2.0)
         K.text(p, QRectF(r.left() + 50, r.top(), r.width() - 50, r.height()),
                "APPROVED" if on else "APPROVE", K.font(self.px, 600, 1.3 if self.px > 11 else 0.8), col)
 

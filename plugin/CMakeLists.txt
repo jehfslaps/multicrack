@@ -97,6 +97,7 @@ target_sources(Xenakis PRIVATE
     src/PreviewPlayer.cpp
     src/AudioLoader.cpp
     src/ui/Skin.cpp
+    src/ui/Motion.cpp
     src/ui/Widgets.cpp
     src/ui/Waveforms.cpp
     src/ui/LoadPage.cpp
@@ -140,7 +141,7 @@ target_link_libraries(xk_engine_cli PRIVATE xenakis_engine juce::juce_audio_form
 juce_add_console_app(xk_snapshot PRODUCT_NAME "xk_snapshot")
 target_sources(xk_snapshot PRIVATE tools/Snapshot.cpp
     src/PluginProcessor.cpp src/PluginEditor.cpp src/Session.cpp src/PreviewPlayer.cpp src/AudioLoader.cpp
-    src/ui/Skin.cpp src/ui/Widgets.cpp src/ui/Waveforms.cpp src/ui/LoadPage.cpp src/ui/ReviewPage.cpp)
+    src/ui/Skin.cpp src/ui/Motion.cpp src/ui/Widgets.cpp src/ui/Waveforms.cpp src/ui/LoadPage.cpp src/ui/ReviewPage.cpp)
 target_include_directories(xk_snapshot PRIVATE src)
 target_compile_definitions(xk_snapshot PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_MODAL_LOOPS_PERMITTED=1 XENAKIS_VERSION="${XENAKIS_VERSION}" JucePlugin_Name="Xenakis")

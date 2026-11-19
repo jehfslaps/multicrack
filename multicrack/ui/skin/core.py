@@ -301,6 +301,19 @@ def corner_screws(p: QPainter, r: QRectF, inset: float = 9, rad: float = 4.6):
         screw(p, QPointF(x, y), rad)
 
 
+def led_mix(p: QPainter, c: QPointF, r: float, color, amount: float, glow: bool = True,
+            glow_scale: float = 3.6):
+    """An LED part-way between off (0) and on (1), for fading it."""
+    amount = max(0.0, min(1.0, amount))
+    if amount < 0.999:
+        led(p, c, r, color, False, glow, glow_scale)
+    if amount > 0.003:
+        p.save()
+        p.setOpacity(p.opacity() * amount)
+        led(p, c, r, color, True, glow, glow_scale)
+        p.restore()
+
+
 def led(p: QPainter, c: QPointF, r: float, color: str | QColor, on: bool, glow: bool = True,
         glow_scale: float = 3.6):
     """Jewel LED with bezel. `color` is the lit color."""

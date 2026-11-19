@@ -41,6 +41,8 @@ void innerShadow (juce::Graphics& g, juce::Rectangle<float> r, float rad, int st
 void screw (juce::Graphics& g, juce::Point<float> c, float r = 5.0f);
 void cornerScrews (juce::Graphics& g, juce::Rectangle<float> r, float inset = 9, float rad = 4.6f);
 void led (juce::Graphics& g, juce::Point<float> c, float r, juce::Colour col, bool on, bool glow = true, float glowScale = 3.6f);
+// an LED part-way between off (0) and on (1), for fading it
+void ledMix (juce::Graphics& g, juce::Point<float> c, float r, juce::Colour col, float amount, bool glow = true, float glowScale = 3.6f);
 void hairlineFrame (juce::Graphics& g, juce::Rectangle<float> r, float rad, juce::Colour c, float w = 1.0f);
 void node (juce::Graphics& g, juce::Point<float> c, float r, juce::Colour col, bool filled);
 void paintGlass (juce::Graphics& g, juce::Rectangle<float> r, float radius = 4.0f);

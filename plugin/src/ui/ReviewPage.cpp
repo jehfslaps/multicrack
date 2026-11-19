@@ -151,7 +151,14 @@ public:
         wave.set (page.ctx.peaks (st.id), c.start, c.end, c.reverse);
     }
 
-    void setSelected (bool on) { if (on != selected) { selected = on; repaint(); } }
+    void setSelected (bool on)
+    {
+        if (on != selected)
+        {
+            selected = on;
+            motion::move (selS, *this, on ? 1 : 0);   // the selection fades across
+        }
+    }
     void setPlayhead (float f) { wave.setPlayhead (f); }
 
     void resized() override
@@ -184,24 +191,28 @@ public:
     void paint (juce::Graphics& g) override
     {
         auto r = getLocalBounds().toFloat();
-        if (selected)
+        const float sl = juce::jlimit (0.0f, 1.0f, selS.getf());
+        const float hv = juce::jlimit (0.0f, 1.0f, hovS.getf()) * (1 - sl);
+        if (hv > 0.003f)
         {
-            g.setColour (C ("row_sel"));
+            g.setColour (C ("row_hover").withMultipliedAlpha (hv));
             g.fillRect (r);
-            g.setColour (C ("red_hi"));
-            g.fillRect (r.withWidth (4));
         }
-        else if (isMouseOver (true))
+        if (sl > 0.003f)
         {
-            g.setColour (C ("row_hover"));
+            g.setColour (C ("row_sel").withMultipliedAlpha (sl));
             g.fillRect (r);
+            // the red edge grows from the middle as the row is selected
+            const float h = r.getHeight() * (0.35f + 0.65f * sl);
+            g.setColour (C ("red_hi").withMultipliedAlpha (juce::jmin (1.0f, sl * 1.5f)));
+            g.fillRect (juce::Rectangle<float> (0, (r.getHeight() - h) / 2, 4, h));
         }
         g.setColour (C ("row_line"));
         g.drawLine (8, r.getHeight() - 0.5f, r.getWidth() - 8, r.getHeight() - 0.5f, 1.0f);
     }
 
-    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
-    void mouseExit (const juce::MouseEvent&) override { repaint(); }
+    void mouseEnter (const juce::MouseEvent&) override { hovS.to (1); }
+    void mouseExit (const juce::MouseEvent&) override { hovS.to (isMouseOver (true) ? 1 : 0); }
     void mouseDown (const juce::MouseEvent&) override { dragged = false; page.select (id, false); }
     void mouseDrag (const juce::MouseEvent& e) override
     {
@@ -216,6 +227,7 @@ private:
     ReviewPage& page;
     int id;
     bool selected = false, dragged = false;
+    motion::Spring selS { 0, motion::FADE, this }, hovS { 0, motion::FADE, this };
     IconLabel grip { "grip", "on_dark_dim" };
     Text num { "", "on_dark_muted", 13, 500, 0.4f }, name { "", "on_dark", 13.5f, 500, 0.3f },
         sub { "", "on_dark_muted", 11, 500, 1.1f, true }, dur { "", "on_dark", 13, 400, 0.4f };
@@ -600,7 +612,7 @@ void ReviewPage::newChopHere()
         if (nc->start < view.viewStart() || nc->end > view.viewEnd())
         {
             const int span = view.viewEnd() - view.viewStart();
-            view.setView (nc->start - span / 3, nc->start - span / 3 + span);
+            view.setView (nc->start - span / 3, nc->start - span / 3 + span, true);
         }
     if (! keepPlaying)
         s.preview (id, false);

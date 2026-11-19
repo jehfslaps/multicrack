@@ -6,6 +6,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (QColor, QLinearGradient, QPainter, QPainterPath, QPen, QPolygonF)
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
+from . import motion as M
 from .skin import core as K
 from .skin.core import C
 
@@ -212,6 +213,9 @@ class TrimEditor(QWidget):
         self.fade_out = 0
         self.reverse = False
         self.playhead = None   # stem sample position or None
+        # the view glides (wheel zoom, zoom buttons, whole stem, another chop); drags stay 1:1
+        self._va = M.Spring(0, M.SCROLL, on_change=lambda _v: self._glide())
+        self._vb = M.Spring(0, M.SCROLL, on_change=lambda _v: self._glide())
 
     def set_fx(self, fade_in: int, fade_out: int, reverse: bool):
         self.fade_in, self.fade_out, self.reverse = int(fade_in), int(fade_out), bool(reverse)
@@ -232,32 +236,61 @@ class TrimEditor(QWidget):
         if keep_view and same_stem and self.view_b > self.view_a:
             self.update()
             return
-        self.show_chop()
+        self.show_chop(animate=same_stem and self.view_b > self.view_a)
 
-    def show_chop(self):
+    def show_chop(self, animate=True):
         length = max(1, self.end - self.start)
         pad = max(int(0.25 * length), int(0.12 * self.sr))
-        self.set_view(self.start - pad, self.end + pad)
+        self.set_view(self.start - pad, self.end + pad, animate)
 
     def show_all(self):
-        self.set_view(0, self.n)
+        self.set_view(0, self.n, True)
 
-    def set_view(self, a, b):
+    def _clamp(self, a, b):
         span = int(min(self.n, max(int(0.01 * self.sr), b - a)))
         a = int(max(0, min(self.n - span, a)))
-        self.view_a, self.view_b = a, a + span
+        return a, a + span
+
+    def _target(self):
+        """Where the view is heading (or is, when it isn't moving)."""
+        if self._va.moving or self._vb.moving:
+            return self._va.target, self._vb.target
+        return self.view_a, self.view_b
+
+    def set_view(self, a, b, animate=False):
+        a, b = self._clamp(a, b)
+        if animate and self.isVisible() and self.view_b > self.view_a:
+            if not (self._va.moving or self._vb.moving):
+                self._va.jump(self.view_a)
+                self._vb.jump(self.view_b)
+            self._va.to(a)
+            self._vb.to(b)
+            return
+        self._va.jump(a)        # stops any glide (drags and auto-scroll are direct)
+        self._vb.jump(b)
+        self.view_a, self.view_b = a, b
+        self.update()
+        self.viewChanged.emit(self.view_a, self.view_b)
+
+    def _glide(self):
+        a, b = int(round(self._va.value)), int(round(self._vb.value))
+        if b - a < 2:
+            return
+        a = max(0, min(self.n - (b - a), a))
+        self.view_a, self.view_b = a, min(self.n, a + (b - a))
         self.update()
         self.viewChanged.emit(self.view_a, self.view_b)
 
     def zoom(self, factor, center=None):
         if self.cache is None:
             return
-        span = self.view_b - self.view_a
+        a0, b0 = self._target()           # quick wheel turns add up
+        span = b0 - a0
         if center is None:
-            center = self.view_a + span // 2
+            center = a0 + span // 2
         new = span * factor
-        a = center - (center - self.view_a) * new / max(1, span)
-        self.set_view(int(a), int(a + new))
+        a = center - (center - a0) * new / max(1, span)
+        self.set_view(int(a), int(a + new), True)
 
     def is_whole(self):
         return self.view_a <= 0 and self.view_b >= self.n
@@ -370,9 +403,10 @@ class TrimEditor(QWidget):
         dy, dx = e.angleDelta().y(), e.angleDelta().x()
         if e.modifiers() & Qt.ShiftModifier or abs(dx) > abs(dy):
             d = dx or dy
-            span = self.view_b - self.view_a
+            a0, b0 = self._target()
+            span = b0 - a0
             shift = int(-d / 120 * span * 0.15)
-            self.set_view(self.view_a + shift, self.view_b + shift)
+            self.set_view(a0 + shift, b0 + shift, True)
         else:
             self.zoom(0.8 if dy > 0 else 1.25, self._s(e.position().x()))
 

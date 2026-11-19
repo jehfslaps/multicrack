@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QLineEdit,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
+from .motion import SmoothWheel
 from .skin import core as K
 from .skin import widgets as W
 
@@ -61,6 +62,8 @@ class ExportPage(QWidget):
         hh.setSectionResizeMode(0, QHeaderView.Stretch)
         hh.setSectionResizeMode(1, QHeaderView.Fixed)
         self.list.setColumnWidth(1, 120)
+        self.list.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
+        self.list._wheel = SmoothWheel(self.list, step=132)
         hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         hh.setFont(K.font(11, 600, 1.4))
         hh.setFixedHeight(36)

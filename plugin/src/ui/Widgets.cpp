@@ -2,6 +2,7 @@
 
 namespace xk::ui
 {
+using motion::mix;
 
 // ================================================================== chassis
 void Chassis::addBus (juce::Component* from, std::vector<std::pair<juce::Component*, float>> targets)
@@ -300,21 +301,43 @@ int HwButton::widthFor (const juce::String& t) const
     return (int) std::ceil (w);
 }
 
-void HwButton::paintButton (juce::Graphics& g, bool over, bool down)
+void HwButton::buttonStateChanged()
+{
+    hv.to (isOver() && isEnabled() ? 1 : 0);
+    pv.to (isDown() ? 1 : 0);
+}
+
+void HwButton::enablementChanged()
+{
+    if (! isEnabled())
+    {
+        hv.jump (0);
+        pv.jump (0);
+    }
+    juce::Button::enablementChanged();
+}
+
+void HwButton::paintButton (juce::Graphics& g, bool, bool)
 {
     auto r = getLocalBounds().toFloat().withTrimmedLeft (1.5f).withTrimmedRight (1.5f).withTrimmedTop (1.5f).withTrimmedBottom (2.5f);
     const bool en = isEnabled();
-    if (down)
-        r = r.translated (0, 1);
+    motion::follow (cv, seen, getToggleState() ? 1 : 0);
+    const float pd = juce::jlimit (0.0f, 1.2f, pv.getf()), ho = juce::jlimit (0.0f, 1.0f, hv.getf());
+    const bool over = ho > 0.5f, down = pd > 0.5f;
+    juce::ignoreUnused (over, down);
+    r = r.translated (0, pd);
     juce::Colour txt = C ("on_dark"), ic = C ("on_dark");
     if (variant == key)
     {
         if (en)
         {
-            softShadow (g, r, 4, down ? 3.0f : 5.0f, 90, down ? 0.8f : 2.2f);
+            softShadow (g, r, 4, mix (5.0f, 3.0f, pd), 90, mix (2.2f, 0.8f, pd));
             auto top = C ("key_hi"), mid = C ("key"), bot = C ("key_lo");
-            if (over) { top = top.brighter (0.03f); mid = mid.brighter (0.04f); }
-            if (down) { top = mid.darker (0.04f); mid = mid.darker (0.06f); }
+            top = mix (top, top.brighter (0.03f), ho);
+            mid = mix (mid, mid.brighter (0.04f), ho);
+            const auto top0 = top;
+            top = mix (top0, mid.darker (0.04f), pd);
+            mid = mix (mid, mid.darker (0.06f), pd);
             juce::ColourGradient cg (top, r.getX(), r.getY(), bot, r.getX(), r.getBottom(), false);
             cg.addColour (0.55, mid);
             g.setGradientFill (cg);
@@ -340,14 +363,16 @@ void HwButton::paintButton (juce::Graphics& g, bool over, bool down)
     {
         if (en)
         {
-            juce::ColourGradient gl (juce::Colour::fromRGBA (255, 70, 50, (juce::uint8) (over ? 70 : 40)), r.getCentreX(), r.getCentreY(),
+            juce::ColourGradient gl (juce::Colour::fromRGBA (255, 70, 50, (juce::uint8) mix (40.0f, 70.0f, ho)), r.getCentreX(), r.getCentreY(),
                                      juce::Colour::fromRGBA (255, 70, 50, 0), r.getCentreX() + r.getWidth() * 0.7f, r.getCentreY(), true);
             g.setGradientFill (gl);
             g.fillRoundedRectangle (r.expanded (6), 9);
             softShadow (g, r, 4, 4, 100, 1.5f);
             auto hi = C ("red_hi"), mid = C ("red"), lo = C ("red_lo");
-            if (over) { hi = hi.brighter (0.08f); mid = mid.brighter (0.08f); }
-            if (down) { hi = mid; mid = mid.darker (0.1f); }
+            hi = mix (hi, hi.brighter (0.08f), ho);
+            mid = mix (mid, mid.brighter (0.08f), ho);
+            hi = mix (hi, mid, pd);
+            mid = mix (mid, mid.darker (0.1f), pd);
             juce::ColourGradient cg (hi, r.getX(), r.getY(), lo, r.getX(), r.getBottom(), false);
             cg.addColour (0.6, mid);
             g.setGradientFill (cg);
@@ -372,7 +397,7 @@ void HwButton::paintButton (juce::Graphics& g, bool over, bool down)
         const auto col = en ? C ("warn") : juce::Colour (0xff5a5a5a);
         if (en)
         {
-            g.setColour (juce::Colour::fromRGBA (232, 100, 78, (juce::uint8) (over ? 40 : 14)));
+            g.setColour (juce::Colour::fromRGBA (232, 100, 78, (juce::uint8) mix (14.0f, 40.0f, ho)));
             g.fillRoundedRectangle (r, 3);
         }
         g.setColour (col);
@@ -385,12 +410,12 @@ void HwButton::paintButton (juce::Graphics& g, bool over, bool down)
         const auto c = r.getCentre();
         const float rad = juce::jmin (r.getWidth(), r.getHeight()) / 2;
         softShadow (g, juce::Rectangle<float> (2 * rad, 2 * rad).withCentre (c), rad, 3, 80, 1.5f);
-        juce::ColourGradient cg (over ? juce::Colour (0xff46494e) : juce::Colour (0xff3a3c40), c.x, c.y - rad * 0.5f,
+        juce::ColourGradient cg (mix (juce::Colour (0xff3a3c40), juce::Colour (0xff46494e), ho), c.x, c.y - rad * 0.5f,
                                  juce::Colour (0xff121314), c.x, c.y - rad * 0.5f + rad * 1.6f, true);
         g.setGradientFill (cg);
         const auto e = juce::Rectangle<float> (2 * (rad - 1), 2 * (rad - 1)).withCentre (c);
         g.fillEllipse (e);
-        g.setColour (over ? juce::Colour (0xffc9c4ba) : juce::Colour (0xff8e8a83));
+        g.setColour (mix (juce::Colour (0xff8e8a83), juce::Colour (0xffc9c4ba), ho));
         g.drawEllipse (e, 1.5f);
         drawIcon (g, iconName.isEmpty() ? "play" : iconName,
                   juce::Rectangle<float> (rad * 1.1f, rad * 1.1f).withCentre (c.translated (1, 0)), juce::Colour (0xfff3efe7));
@@ -398,17 +423,12 @@ void HwButton::paintButton (juce::Graphics& g, bool over, bool down)
     }
     else   // dark / icon
     {
-        juce::ColourGradient cg (over ? juce::Colour (0xff2c2f33) : juce::Colour (0xff24262a), r.getX(), r.getY(),
-                                 juce::Colour (0xff17181a), r.getX(), r.getBottom(), false);
-        if (down)
-            cg = juce::ColourGradient (juce::Colour (0xff141516), r.getX(), r.getY(), juce::Colour (0xff17181a), r.getX(), r.getBottom(), false);
+        const auto top = mix (mix (juce::Colour (0xff24262a), juce::Colour (0xff2c2f33), ho), juce::Colour (0xff141516), pd);
+        juce::ColourGradient cg (top, r.getX(), r.getY(), juce::Colour (0xff17181a), r.getX(), r.getBottom(), false);
         g.setGradientFill (cg);
         g.fillRoundedRectangle (r, RADIUS);
-        auto border = en ? juce::Colour (0xff8a867f) : juce::Colour (0xff45474b);
-        if (over && en)
-            border = juce::Colour (0xffd9d4ca);
-        if (getToggleState())
-            border = C ("red_hi");
+        auto border = en ? mix (juce::Colour (0xff8a867f), juce::Colour (0xffd9d4ca), ho) : juce::Colour (0xff45474b);
+        border = mix (border, C ("red_hi"), cv.getf());
         g.setColour (border);
         g.drawRoundedRectangle (r, RADIUS, 1.1f);
         txt = ic = en ? C ("on_dark") : juce::Colour (0xff6d6a65);
@@ -455,21 +475,23 @@ int LedToggle::naturalWidth() const
     return (int) std::ceil (w);
 }
 
-void LedToggle::paintButton (juce::Graphics& g, bool over, bool)
+void LedToggle::paintButton (juce::Graphics& g, bool, bool)
 {
     auto r = getLocalBounds().toFloat().reduced (1);
     const bool en = isEnabled(), on = getToggleState() && en;
-    g.setGradientFill (juce::ColourGradient (over && en ? juce::Colour (0xff2c2e32) : juce::Colour (0xff26282b), r.getX(), r.getY(),
+    motion::follow (lit, seen, on ? 1 : 0);
+    const float lv = juce::jlimit (0.0f, 1.0f, lit.getf());
+    g.setGradientFill (juce::ColourGradient (mix (juce::Colour (0xff26282b), juce::Colour (0xff2c2e32), en ? hv.getf() : 0.0f), r.getX(), r.getY(),
                                              juce::Colour (0xff1c1d20), r.getX(), r.getBottom(), false));
     g.fillRoundedRectangle (r, RADIUS);
     g.setColour (en ? juce::Colour (0xff4a4d52) : juce::Colour (0xff36383c));
     g.drawRoundedRectangle (r, RADIUS, 1.0f);
     const auto col = green ? C ("led_green") : C ("led_red");
-    led (g, { r.getX() + 17, r.getCentreY() }, 5.2f, col, on);
+    ledMix (g, { r.getX() + 17, r.getCentreY() }, 5.2f, col, lv);
     float x = r.getX() + 32;
     if (iconName.isNotEmpty())
     {
-        drawIcon (g, iconName, { x, r.getCentreY() - 9, 18, 18 }, on ? col : C ("on_dark_muted"), 1.7f);
+        drawIcon (g, iconName, { x, r.getCentreY() - 9, 18, 18 }, mix (C ("on_dark_muted"), col, lv), 1.7f);
         x += 26;
     }
     const auto f = font (12, 600, 1.4f);
@@ -477,14 +499,18 @@ void LedToggle::paintButton (juce::Graphics& g, bool over, bool)
     ui::text (g, { x, r.getY(), r.getWidth(), r.getHeight() }, l, f, en ? C ("on_dark") : juce::Colour (0xff6d6a65));
     if (showState)
         ui::text (g, { x + textWidth (l, f) + 10, r.getY(), 60, r.getHeight() }, getToggleState() ? "ON" : "OFF", f,
-              on ? col : C ("on_dark_dim"));
+              mix (C ("on_dark_dim"), col, lv));
 }
 
 // ============================================================ step selector
 StepSelector::StepSelector (juce::StringArray n) : names (std::move (n))
 {
     for (int i = 0; i < names.size(); ++i)
+    {
         enabled.add (true);
+        lit.push_back (std::make_unique<motion::Spring> (i == 0 ? 1.0 : 0.0, motion::FADE, this));
+        hv.push_back (std::make_unique<motion::Spring> (0.0, motion::FADE, this));
+    }
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
 }
 
@@ -510,10 +536,28 @@ void StepSelector::mouseMove (const juce::MouseEvent& e)
     for (int i = 0; i < names.size(); ++i)
         if (cell (i).contains (e.position))
             h = i;
-    if (h != hover) { hover = h; repaint(); }
+    if (h != hover)
+    {
+        hover = h;
+        for (int i = 0; i < (int) hv.size(); ++i)
+            hv[(size_t) i]->to (i == h ? 1 : 0);
+    }
 }
 
-void StepSelector::mouseExit (const juce::MouseEvent&) { hover = -1; repaint(); }
+void StepSelector::mouseExit (const juce::MouseEvent&)
+{
+    hover = -1;
+    for (auto& s : hv)
+        s->to (0);
+}
+
+void StepSelector::setCurrent (int i)
+{
+    current = i;
+    for (int k = 0; k < (int) lit.size(); ++k)
+        motion::move (*lit[(size_t) k], *this, k == i ? 1 : 0);
+    repaint();
+}
 
 void StepSelector::mouseDown (const juce::MouseEvent& e)
 {
@@ -535,7 +579,7 @@ void StepSelector::paint (juce::Graphics& g)
     {
         const auto c = cell (i);
         const bool active = i == current, en = enabled[i];
-        const auto base = (hover == i && en) ? juce::Colour (0xff2a2c30) : juce::Colour (0xff232528);
+        const auto base = mix (juce::Colour (0xff232528), juce::Colour (0xff2a2c30), en ? hv[(size_t) i]->getf() : 0.0f);
         g.setGradientFill (juce::ColourGradient (active ? juce::Colour (0xff1c1d20) : base.brighter (0.12f), c.getX(), c.getY(),
                                                  juce::Colour (0xff17181a), c.getX(), c.getBottom(), false));
         g.fillRoundedRectangle (c, 3);
@@ -547,7 +591,7 @@ void StepSelector::paint (juce::Graphics& g)
             g.drawLine (c.getX() + 3, c.getY() + 1.3f, c.getRight() - 3, c.getY() + 1.3f, 1.0f);
         }
         const float lx = compact ? 14.0f : 18.0f, tx = compact ? 26.0f : 34.0f;
-        led (g, { c.getX() + lx, c.getCentreY() }, compact ? 4.8f : 5.5f, C ("led_red"), active);
+        ledMix (g, { c.getX() + lx, c.getCentreY() }, compact ? 4.8f : 5.5f, C ("led_red"), lit[(size_t) i]->getf());
         const auto num = names[i].upToFirstOccurrenceOf (" ", false, false);
         const auto nm = names[i].fromFirstOccurrenceOf (" ", false, false).toUpperCase();
         const auto f = font (compact ? 11.0f : 12.0f, active ? 600 : 500, compact ? 0.8f : 1.6f);
@@ -576,8 +620,9 @@ void LeverSwitch::paintButton (juce::Graphics& g, bool, bool)
     g.drawEllipse (juce::Rectangle<float> (22, 22).withCentre (c), 0.8f);
     g.setColour (juce::Colour (0xff2a2a2a));
     g.fillEllipse (juce::Rectangle<float> (9, 9).withCentre (c));
-    const bool down = getToggleState();
-    const juce::Point<float> tip (c.x + 2, c.y + (down ? 15.0f : -15.0f));
+    motion::follow (pos, seen, getToggleState() ? 1 : -1);
+    const float t = juce::jlimit (0.0f, 1.0f, (pos.getf() + 1) / 2);
+    const juce::Point<float> tip (c.x + 2, c.y + 15.0f * juce::jlimit (-1.15f, 1.15f, pos.getf()));
     g.setColour (juce::Colour::fromRGBA (0, 0, 0, 90));
     g.drawLine (c.x + 1, c.y + 1.5f, tip.x + 1, tip.y + 1.5f, 6.5f);
     juce::ColourGradient lg (juce::Colour (0xff7a7874), c.x - 3, 0, juce::Colour (0xff8e8b86), c.x + 4, 0, false);
@@ -591,8 +636,8 @@ void LeverSwitch::paintButton (juce::Graphics& g, bool, bool)
     g.setGradientFill (tg);
     g.fillEllipse (juce::Rectangle<float> (8.6f, 8.6f).withCentre (tip));
     const auto f = font (11.5f, 600, 1.6f);
-    ui::text (g, { r.getX() + 52, r.getY() + 4, 80, r.getHeight() / 2 - 4 }, "LIGHT", f, down ? C ("on_dark_dim") : C ("on_dark"));
-    ui::text (g, { r.getX() + 52, r.getCentreY(), 80, r.getHeight() / 2 - 4 }, "DARK", f, down ? C ("on_dark") : C ("on_dark_dim"));
+    ui::text (g, { r.getX() + 52, r.getY() + 4, 80, r.getHeight() / 2 - 4 }, "LIGHT", f, mix (C ("on_dark"), C ("on_dark_dim"), t));
+    ui::text (g, { r.getX() + 52, r.getCentreY(), 80, r.getHeight() / 2 - 4 }, "DARK", f, mix (C ("on_dark_dim"), C ("on_dark"), t));
 }
 
 // ===================================================================== lcd
@@ -636,20 +681,26 @@ void LedMeter::paint (juce::Graphics& g)
     auto inner = r.reduced (6);
     const int n = segments;
     const float gap = 2.5f, w = (inner.getWidth() - gap * (n - 1)) / n;
-    const int lit = frac < 1 ? (int) std::round (frac * n) : n;
+    const float f = juce::jlimit (0.0f, 1.0f, shown.getf());
+    const float litF = (frac < 1 || f < 0.999f) ? f * n : (float) n;
     const auto on = C ("led_green");
     for (int i = 0; i < n; ++i)
     {
         juce::Rectangle<float> seg (inner.getX() + i * (w + gap), inner.getY(), w, inner.getHeight());
-        if (i < lit)
+        const float a = juce::jlimit (0.0f, 1.0f, litF - i + 0.5f);   // the edge segment fades in
+        if (a < 1)
         {
-            g.setColour (on.withAlpha ((juce::uint8) 60));
-            g.fillRoundedRectangle (seg.expanded (1.5f), 2);
-            g.setGradientFill (juce::ColourGradient (on.brighter (0.4f), seg.getX(), seg.getY(), on.darker (0.1f), seg.getX(), seg.getBottom(), false));
-        }
-        else
             g.setColour (juce::Colour::fromRGBA (40, 70, 50, 120));
-        g.fillRoundedRectangle (seg, 1.5f);
+            g.fillRoundedRectangle (seg, 1.5f);
+        }
+        if (a > 0)
+        {
+            g.setColour (on.withAlpha ((juce::uint8) (60 * a)));
+            g.fillRoundedRectangle (seg.expanded (1.5f), 2);
+            g.setGradientFill (juce::ColourGradient (on.brighter (0.4f).withMultipliedAlpha (a), seg.getX(), seg.getY(),
+                                                     on.darker (0.1f).withMultipliedAlpha (a), seg.getX(), seg.getBottom(), false));
+            g.fillRoundedRectangle (seg, 1.5f);
+        }
     }
 }
 
@@ -716,18 +767,20 @@ void Lamp::paint (juce::Graphics& g)
     led (g, getLocalBounds().toFloat().getCentre(), r, C ("led_green"), on, true, half / r - 0.05f);
 }
 
-void ApprovePill::paintButton (juce::Graphics& g, bool over, bool)
+void ApprovePill::paintButton (juce::Graphics& g, bool, bool)
 {
     auto r = getLocalBounds().toFloat().withTrimmedLeft (1).withTrimmedRight (1).withTrimmedTop (2).withTrimmedBottom (2);
     const bool on = getToggleState();
-    g.setGradientFill (juce::ColourGradient (over ? juce::Colour (0xff2a2c30) : juce::Colour (0xff232528), r.getX(), r.getY(),
+    motion::follow (lit, seen, on ? 1 : 0);
+    const float l = juce::jlimit (0.0f, 1.0f, lit.getf());
+    g.setGradientFill (juce::ColourGradient (mix (juce::Colour (0xff232528), juce::Colour (0xff2a2c30), hv.getf()), r.getX(), r.getY(),
                                              juce::Colour (0xff18191b), r.getX(), r.getBottom(), false));
     g.fillRoundedRectangle (r, RADIUS);
-    g.setColour (on ? juce::Colour::fromRGBA (75, 224, 122, 140) : juce::Colour (0xff45484d));
+    g.setColour (mix (juce::Colour (0xff45484d), juce::Colour::fromRGBA (75, 224, 122, 140), l));
     g.drawRoundedRectangle (r, RADIUS, 1.0f);
-    led (g, { r.getX() + 15, r.getCentreY() }, 4.8f, C ("led_green"), on);
-    const auto col = on ? C ("on_dark") : C ("on_dark_muted");
-    drawIcon (g, "check", { r.getX() + 28, r.getCentreY() - 8, 16, 16 }, on ? C ("led_green") : col, 2.0f);
+    ledMix (g, { r.getX() + 15, r.getCentreY() }, 4.8f, C ("led_green"), l);
+    const auto col = mix (C ("on_dark_muted"), C ("on_dark"), l);
+    drawIcon (g, "check", { r.getX() + 28, r.getCentreY() - 8, 16, 16 }, mix (col, C ("led_green"), l), 2.0f);
     const float px = getWidth() >= 130 ? 11.5f : 10.5f;
     ui::text (g, r.withTrimmedLeft (50), on ? "APPROVED" : "APPROVE", font (px, 600, px > 11 ? 1.3f : 0.8f), col);
 }
