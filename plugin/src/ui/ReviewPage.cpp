@@ -128,6 +128,9 @@ public:
         del.setTooltip ("Delete this chop (Delete key)");
         del.onClick = [this] { page.ctx.session.deleteChop (id); };
         addAndMakeVisible (del);
+        clone.setTooltip ("Clone this chop (Ctrl+D), then fine-tune the copy");
+        clone.onClick = [this] { page.select (id, false); page.cloneSelected(); };
+        addAndMakeVisible (clone);
         setTooltip ("Drag this row into your DAW (or any folder) to use the sample right away");
         setMouseCursor (juce::MouseCursor::PointingHandCursor);
     }
@@ -165,6 +168,9 @@ public:
         sub.setBounds (nm.getX(), h / 2 + 2, nm.getWidth(), 16);
         auto right = r.removeFromRight (c.del);
         del.setBounds (right.withSizeKeepingCentre (c.del, c.del));
+        r.removeFromRight (GAP - 4);
+        right = r.removeFromRight (c.del);
+        clone.setBounds (right.withSizeKeepingCentre (c.del, c.del));
         r.removeFromRight (GAP);
         approve.setBounds (r.removeFromRight (c.approve).withSizeKeepingCentre (c.approve, 34));
         r.removeFromRight (GAP);
@@ -217,7 +223,7 @@ private:
     MiniWave wave;
     juce::ComboBox type;
     ApprovePill approve;
-    HwButton del { "", HwButton::icon, "trash" };
+    HwButton del { "", HwButton::icon, "trash" }, clone { "", HwButton::icon, "copy" };
 };
 
 // ====================================================================== page
@@ -228,12 +234,22 @@ ReviewPage::ReviewPage (Context& c) : ctx (c)
     head.addAndMakeVisible (meter);
     head.addAndMakeVisible (approveAll);
     head.addAndMakeVisible (exportBtn);
+    head.addAndMakeVisible (undoBtn);
+    head.addAndMakeVisible (redoBtn);
+    undoBtn.setTooltip ("Undo (Ctrl+Z)");
+    redoBtn.setTooltip ("Redo (Ctrl+Y)");
+    undoBtn.onClick = [this] { doUndo(); };
+    redoBtn.onClick = [this] { doRedo(); };
     approveAll.onClick = [this] { ctx.session.approveAll(); };
     exportBtn.onClick = [this] { ctx.session.exportAll(); };
 
     addAndMakeVisible (split);
-    for (auto* comp : std::initializer_list<juce::Component*> { &edName, &flagTile, &readout, &view, &transport, &loopBtn, &dragBtn, &dragHint })
+    for (auto* comp : std::initializer_list<juce::Component*> { &edName, &flagTile, &readout, &view, &transport, &loopBtn, &dragBtn,
+                                                                &resetBtn, &snapBtn, &zoomTile, &wholeBtn, &fadeIn, &fadeOut, &autoFades,
+                                                                &reverseBtn, &gain, &seamBtn, &cloneBtn, &newBtn })
         editorMod.addAndMakeVisible (comp);
+    for (auto* comp : std::initializer_list<juce::Component*> { &zoomCap, &zoomOut, &zoomIn, &zoomChop })
+        zoomTile.addAndMakeVisible (comp);
     flagTile.alert = false;
     flagTile.addAndMakeVisible (flagIcon);
     flagTile.addAndMakeVisible (flagText);
@@ -247,10 +263,98 @@ ReviewPage::ReviewPage (Context& c) : ctx (c)
     loopBtn.setTooltip ("Loop playback (L). Loop chops always repeat so you can hear the seam.");
     loopBtn.setToggleState (ctx.session.settings().get ("loop_play", "0") == "1", juce::dontSendNotification);
     loopBtn.onClick = [this] { ctx.session.settings().set ("loop_play", loopBtn.getToggleState() ? "1" : "0"); };
-    dragBtn.setTooltip ("Press and drag this into your DAW's playlist or a channel to drop the selected sample there");
+    dragBtn.setTooltip ("Press and drag this into your DAW's playlist or a channel to drop the selected sample there. "
+                        "Or drag any row below.");
     dragBtn.addMouseListener (this, false);
-    dragHint.elide = true;
-    view.onClickAt = [this] (int) { if (selected >= 0) ctx.session.preview (selected, loopBtn.getToggleState()); };
+
+    // ---- trim editor
+    view.onSeek = [this] (int sample) {
+        if (auto* c = ctx.session.chopById (selected))
+        {
+            followStem = c->stemId;
+            ctx.session.previewStem (c->stemId, sample);
+            grabKeyboardFocus();
+        }
+    };
+    view.onSelecting = [this] (int a, int b) {
+        if (auto* c = ctx.session.chopById (selected))
+            if (auto* st = ctx.session.stemById (c->stemId))
+                readout.set ("", juce::String ((b - a) / (double) st->sr, 3) + (ctx.narrow ? " S" : " S SELECTED"));
+    };
+    view.onTrimmed = [this] (int a, int b) {
+        if (selected < 0)
+            return;
+        ctx.session.setTrim (selected, a, b);
+        ctx.session.preview (selected, loopBtn.getToggleState());
+        grabKeyboardFocus();
+    };
+    snapBtn.setTooltip ("Snap (S). On: a start dropped within about 12 ms of a hit lines up with its attack, "
+                        "and loops slide along the bar grid. Off: no snapping at all.");
+    snapBtn.setToggleState (ctx.session.settings().get ("snap_trim", "1") == "1", juce::dontSendNotification);
+    snapBtn.onClick = [this] { ctx.session.settings().set ("snap_trim", snapBtn.getToggleState() ? "1" : "0"); updateEditor(); };
+    resetBtn.setTooltip ("Put the start and end back where the chop was found");
+    resetBtn.onClick = [this] { if (selected >= 0) { ctx.session.resetTrim (selected); shownChop = -1; updateEditor(); } };
+    zoomOut.setTooltip ("Zoom out (or scroll the wheel over the waveform)");
+    zoomIn.setTooltip ("Zoom in (or scroll the wheel over the waveform)");
+    zoomChop.setTooltip ("Zoom to the chop");
+    wholeBtn.setTooltip ("Show the entire stem");
+    zoomOut.onClick = [this] { view.zoom (1.6); };
+    zoomIn.onClick = [this] { view.zoom (0.6); };
+    zoomChop.onClick = [this] { view.showChop(); };
+    wholeBtn.onClick = [this] { view.showAll(); };
+    cloneBtn.setTooltip ("Clone this chop (Ctrl+D), then fine-tune the copy");
+    cloneBtn.onClick = [this] { cloneSelected(); };
+    newBtn.setTooltip ("Make your own chop (N). Click the waveform to play the stem, then press N (or this button) "
+                       "where you hear a sound. It starts on that sound; drag the red flags to fine-tune it.");
+    newBtn.onClick = [this] { newChopHere(); };
+    fadeIn.autoText = fadeOut.autoText = "AUTO";
+    fadeIn.setTooltip ("Fade-in length. Drag up / down (Shift = fine), double-click for automatic.");
+    fadeOut.setTooltip ("Fade-out length. Drag up / down (Shift = fine), double-click for automatic.");
+    gain.setTooltip ("Every sample is normalized to -0.1 dB. Turn one down from there. Double-click resets.");
+    for (auto* vb : { &fadeIn, &fadeOut, &gain })
+        vb->onDragStart = [this] { ctx.session.checkpoint(); };
+    fadeIn.onChange = [this] (double v) {
+        if (auto* c = ctx.session.chopById (selected))
+            ctx.session.setFades (selected, v, c->fadeOutMs, false);
+    };
+    fadeOut.onChange = [this] (double v) {
+        if (auto* c = ctx.session.chopById (selected))
+            ctx.session.setFades (selected, c->fadeInMs, v, false);
+    };
+    gain.onChange = [this] (double v) { if (selected >= 0) ctx.session.setGain (selected, v, false); };
+    fadeIn.onReset = [this] { if (auto* c = ctx.session.chopById (selected)) ctx.session.setFades (selected, -1, c->fadeOutMs); };
+    fadeOut.onReset = [this] { if (auto* c = ctx.session.chopById (selected)) ctx.session.setFades (selected, c->fadeInMs, -1); };
+    gain.onReset = [this] { if (selected >= 0) ctx.session.setGain (selected, 0.0); };
+    autoFades.setTooltip ("On: automatic de-click fades. Drag a fade to set your own.");
+    autoFades.onClick = [this] {
+        if (auto* c = ctx.session.chopById (selected))
+        {
+            if (autoFades.getToggleState())
+                ctx.session.setFades (selected, -1, -1);
+            else
+            {
+                auto [din, dout] = render::defaultFadesMs (*c);
+                ctx.session.setFades (selected, din, dout);
+            }
+        }
+    };
+    reverseBtn.setTooltip ("Play and export this chop backwards (R). The file name gets 'Rev'.");
+    reverseBtn.onClick = [this] {
+        if (selected >= 0)
+        {
+            ctx.session.setReverse (selected, reverseBtn.getToggleState());
+            ctx.session.preview (selected, loopBtn.getToggleState());
+        }
+    };
+    seamBtn.setTooltip ("Loops: blends the end into what comes just before the start, so it repeats without a click. "
+                        "Length stays on the bars.");
+    seamBtn.onClick = [this] {
+        if (selected >= 0)
+        {
+            ctx.session.setSeam (selected, seamBtn.getToggleState());
+            ctx.session.preview (selected, loopBtn.getToggleState());
+        }
+    };
 
     for (auto t : { "#", "File / stem", "Waveform", "Duration", "Type", "Actions" })
         listMod.addAndMakeVisible (cols.add (new Text (t, "header_text", 11, 600, 1.4f, true)));
@@ -268,7 +372,7 @@ ReviewPage::ReviewPage (Context& c) : ctx (c)
     listMod.padB = 10;
     head.padL = head.padR = 20;
     head.padT = head.padB = 10;
-    split.topMin = 250;
+    split.topMin = 330;
     split.bottomMin = 150;
     try
     {
@@ -356,6 +460,8 @@ void ReviewPage::updateHeader()
                           : (a > 0 && s.savedCount() > 0) ? juce::String ("Every approved chop is already saved. Approve more to export again.")
                                                           : juce::String ("Approve the chops you want, then export them"));
     approveAll.setEnabled (n > 0 && ! done);
+    undoBtn.setEnabled (s.canUndo() && ! s.busy());
+    redoBtn.setEnabled (s.canRedo() && ! s.busy());
     resized();
 }
 
@@ -398,12 +504,133 @@ void ReviewPage::updateEditor()
     flagText.setText (juce::String (c->flag));
     flagText.setColourKey (warn ? "warn" : "on_dark_muted");
     flagTile.setTooltip (juce::String (c->flag));
-    view.set (ctx.peaks (st->id), st->frames(), st->sr, c->start, c->end);
+    // same chop: keep the zoom. Another chop: show it (but stay zoomed out if the whole stem is shown)
+    const bool sameChop = shownChop == c->id;
+    view.set (ctx.peaks (st->id), st->frames(), st->sr, c->start, c->end, sameChop || view.isWhole());
+    shownChop = c->id;
+    const int stemId = st->id;
+    const bool isLoop = c->kind == "loop";
+    if (snapBtn.getToggleState())
+    {
+        view.snap = isLoop ? std::function<int (int)>() : std::function<int (int)> ([this, stemId] (int x) { return ctx.session.magnet (stemId, x); });
+        view.snapMove = isLoop ? std::function<int (int)> ([this, stemId] (int x) { return ctx.session.snapToBar (stemId, x); }) : std::function<int (int)>();
+    }
+    else
+        view.snap = view.snapMove = nullptr;
+    loadFx (*c);
     resized();
+}
+
+void ReviewPage::loadFx (const Chop& c)
+{
+    auto* st = ctx.session.stemById (c.stemId);
+    const int sr = st ? st->sr : 44100;
+    auto [din, dout] = render::defaultFadesMs (c);
+    const double fi = c.fadeInMs < 0 ? din : c.fadeInMs, fo = c.fadeOutMs < 0 ? dout : c.fadeOutMs;
+    fadeIn.setValue (fi, c.fadeInMs < 0);
+    fadeOut.setValue (fo, c.fadeOutMs < 0);
+    gain.setValue (c.gainDb);
+    autoFades.setToggleState (c.fadeInMs < 0 && c.fadeOutMs < 0, juce::dontSendNotification);
+    reverseBtn.setToggleState (c.reverse, juce::dontSendNotification);
+    seamBtn.setToggleState (c.seam, juce::dontSendNotification);
+    seamBtn.setEnabled (c.kind == "loop");
+    resetBtn.setEnabled (c.origStart >= 0 && (c.start != c.origStart || c.end != c.origEnd));
+    view.setFx ((int) (fi * sr / 1000.0), (int) (fo * sr / 1000.0), c.reverse);
+}
+
+int ReviewPage::playheadSample() const
+{
+    auto& s = ctx.session;
+    const int pid = s.player.playingId();
+    const double pos = s.player.position();
+    auto* c = s.chopById (selected);
+    if (c == nullptr || pos < 0)
+        return -1;
+    if (pid == Session::STEM_PLAY + c->stemId)
+        return s.stemPlayFrom + (int) (pos * s.stemPlayLen);
+    if (pid == c->id)
+        return c->start + (int) ((c->reverse ? 1.0 - pos : pos) * c->length());
+    return -1;
+}
+
+void ReviewPage::togglePlay()
+{
+    auto& s = ctx.session;
+    if (s.player.playingId() >= 0)
+        s.stopPreview();
+    else if (selected >= 0)
+        s.preview (selected, loopBtn.getToggleState());
+}
+
+void ReviewPage::cloneSelected()
+{
+    if (selected < 0)
+        return;
+    const int id = ctx.session.cloneChop (selected);
+    if (id >= 0)
+    {
+        refresh();
+        select (id, false);
+    }
+}
+
+void ReviewPage::newChopHere()
+{
+    auto& s = ctx.session;
+    auto* c = s.chopById (selected);
+    if (c == nullptr || ! view.hasStem())
+        return;
+    const int stemId = c->stemId;
+    int at = -1;
+    if (s.player.playingId() == Session::STEM_PLAY + stemId)
+        at = playheadSample();
+    if (at < 0)
+        at = (view.viewStart() + view.viewEnd()) / 2;
+    const bool keepPlaying = s.player.playingId() == Session::STEM_PLAY + stemId;
+    const int id = s.newChopAt (stemId, at, selected);
+    if (id < 0)
+        return;
+    refresh();
+    selected = id;
+    for (auto& [rid, row] : rowById)
+        row->setSelected (rid == id);
+    shownChop = id;                 // keep the zoom, so you can keep listening
+    updateEditor();
+    if (auto* nc = s.chopById (id))
+        if (nc->start < view.viewStart() || nc->end > view.viewEnd())
+        {
+            const int span = view.viewEnd() - view.viewStart();
+            view.setView (nc->start - span / 3, nc->start - span / 3 + span);
+        }
+    if (! keepPlaying)
+        s.preview (id, false);
+    if (ctx.status)
+        ctx.status ("Added your own chop. Drag the red flags to fine-tune it.");
+    grabKeyboardFocus();
+}
+
+void ReviewPage::doUndo()
+{
+    if (ctx.session.undo())
+    {
+        shownChop = -1;
+        refresh();
+    }
+}
+
+void ReviewPage::doRedo()
+{
+    if (ctx.session.redo())
+    {
+        shownChop = -1;
+        refresh();
+    }
 }
 
 void ReviewPage::select (int chopId, bool play)
 {
+    if (chopId != selected)
+        shownChop = -1;
     selected = chopId;
     for (auto& [id, row] : rowById)
         row->setSelected (id == chopId);
@@ -456,11 +683,19 @@ bool ReviewPage::keyPressed (const juce::KeyPress& k, juce::Component*)
     auto& s = ctx.session;
     if (k == juce::KeyPress::downKey) { moveSelection (1); return true; }
     if (k == juce::KeyPress::upKey) { moveSelection (-1); return true; }
-    if (k == juce::KeyPress::spaceKey)
+    if (k == juce::KeyPress::spaceKey) { togglePlay(); return true; }
+    const auto ch = juce::CharacterFunctions::toLowerCase (k.getTextCharacter());
+    const auto code = k.getKeyCode();
+    if (k.getModifiers().isCommandDown())
     {
-        if (s.player.playingId() >= 0) s.stopPreview();
-        else if (selected >= 0) s.preview (selected, loopBtn.getToggleState());
-        return true;
+        if (code == 'Z' || code == 'z')
+        {
+            if (k.getModifiers().isShiftDown()) doRedo(); else doUndo();
+            return true;
+        }
+        if (code == 'Y' || code == 'y') { doRedo(); return true; }
+        if ((code == 'D' || code == 'd') && selected >= 0) { cloneSelected(); return true; }
+        return false;
     }
     if (selected < 0)
         return false;
@@ -492,6 +727,17 @@ bool ReviewPage::keyPressed (const juce::KeyPress& k, juce::Component*)
         loopBtn.setToggleState (! loopBtn.getToggleState(), juce::sendNotification);
         return true;
     }
+    if (ch == 'n') { newChopHere(); return true; }
+    if (ch == 'r')
+    {
+        reverseBtn.setToggleState (! reverseBtn.getToggleState(), juce::sendNotification);
+        return true;
+    }
+    if (ch == 's')
+    {
+        snapBtn.setToggleState (! snapBtn.getToggleState(), juce::sendNotification);
+        return true;
+    }
     return false;
 }
 
@@ -502,14 +748,14 @@ void ReviewPage::tick()
     const double pos = s.player.position();
     for (auto& [id, row] : rowById)
         row->setPlayhead (id == playing && pos >= 0 ? (float) pos : -1.0f);
-    if (playing == selected && pos >= 0)
-        if (auto* c = s.chopById (selected))
-        {
-            const double p = c->reverse ? 1.0 - pos : pos;
-            view.setPlayhead (c->start + (int) (p * c->length()));
-            return;
-        }
-    view.setPlayhead (-1);
+    const int ph = playheadSample();
+    view.setPlayhead (ph);
+    // playing the stem past the right edge: the view follows
+    if (ph >= 0 && playing >= Session::STEM_PLAY && ! view.dragging() && ph > view.viewEnd())
+    {
+        const int span = view.viewEnd() - view.viewStart();
+        view.setView (ph - span / 10, ph - span / 10 + span);
+    }
 }
 
 void ReviewPage::resized()
@@ -526,6 +772,13 @@ void ReviewPage::resized()
         c.removeFromRight (10);
         const int aw = juce::jmax (narrow ? 0 : 140, approveAll.widthFor (approveAll.getButtonText()));
         approveAll.setBounds (c.removeFromRight (aw).withSizeKeepingCentre (aw, H_KEY));
+        c.removeFromRight (10);
+        undoBtn.setButtonText (narrow ? "" : "Undo");
+        redoBtn.setButtonText (narrow ? "" : "Redo");
+        const int uw = narrow ? 46 : juce::jmax (104, redoBtn.widthFor ("Redo"));
+        redoBtn.setBounds (c.removeFromRight (uw).withSizeKeepingCentre (uw, H_KEY));
+        c.removeFromRight (8);
+        undoBtn.setBounds (c.removeFromRight (uw).withSizeKeepingCentre (uw, H_KEY));
         c.removeFromRight (18);
         count.setFontSpec (narrow ? 17.0f : 21.0f, 600, narrow ? 1.6f : 2.2f);
         const int cw = narrow ? 200 : 290;
@@ -552,20 +805,73 @@ void ReviewPage::resized()
         ft.removeFromLeft (8);
         flagText.setBounds (ft);
         c.removeFromTop (8);
+        // two rows of controls under the waveform
+        auto row2 = c.removeFromBottom (H_ROW);
+        c.removeFromBottom (8);
         auto row = c.removeFromBottom (H_ROW);
         c.removeFromBottom (8);
         view.setBounds (c);
+        const int G = 8;
+        // row 1: play / stop, loop, reset trim, snap, zoom, whole stem, new chop
         transport.setBounds (row.removeFromLeft (5 + 48 + 6 + 48 + 5));
         playBtn.setBounds (5, 5, 48, H_ROW - 10);
         stopBtn.setBounds (5 + 48 + 6, 5, 48, H_ROW - 10);
-        row.removeFromLeft (8);
-        loopBtn.showState = ! narrow;
+        row.removeFromLeft (G);
+        loopBtn.showState = snapBtn.showState = ! narrow;
+        for (auto* t : { &autoFades, &reverseBtn, &seamBtn })
+            t->showState = false;           // the LED shows on / off
         loopBtn.setBounds (row.removeFromLeft (loopBtn.naturalWidth()));
-        row.removeFromLeft (8);
-        dragBtn.setButtonText (narrow ? "Drag to DAW" : "Drag into your DAW");
-        dragBtn.setBounds (row.removeFromLeft (dragBtn.widthFor (dragBtn.getButtonText())));
-        row.removeFromLeft (14);
-        dragHint.setBounds (row);
+        row.removeFromLeft (G);
+        resetBtn.setButtonText (narrow ? "Reset" : "Reset trim");
+        resetBtn.setBounds (row.removeFromLeft (resetBtn.widthFor (resetBtn.getButtonText())));
+        row.removeFromLeft (G);
+        snapBtn.setBounds (row.removeFromLeft (snapBtn.naturalWidth()));
+        row.removeFromLeft (G);
+        newBtn.setButtonText (narrow ? "New" : "New chop");
+        newBtn.setBounds (row.removeFromRight (newBtn.widthFor (newBtn.getButtonText())));
+        row.removeFromRight (G);
+        wholeBtn.setButtonText (narrow ? "Whole" : "Whole stem");
+        wholeBtn.setBounds (row.removeFromRight (wholeBtn.widthFor (wholeBtn.getButtonText())));
+        row.removeFromRight (G);
+        zoomTile.setBounds (row);
+        {
+            auto z = zoomTile.getLocalBounds().reduced (12, 0);
+            zoomCap.setBounds (z.removeFromLeft ((int) zoomCap.naturalWidth() + 4));
+            z.removeFromLeft (6);
+            const int cw = zoomChop.widthFor ("Chop");
+            zoomChop.setBounds (z.removeFromRight (cw).withSizeKeepingCentre (cw, H_SMALL));
+            z.removeFromRight (8);
+            zoomOut.setBounds (z.removeFromLeft (H_SMALL).withSizeKeepingCentre (H_SMALL, H_SMALL));
+            z.removeFromLeft (6);
+            zoomIn.setBounds (z.removeFromLeft (H_SMALL).withSizeKeepingCentre (H_SMALL, H_SMALL));
+        }
+        // row 2: the chop's sound, then copy / drag out
+        dragBtn.setButtonText (narrow ? "Drag" : "Drag into your DAW");
+        dragBtn.setBounds (row2.removeFromRight (dragBtn.widthFor (dragBtn.getButtonText())));
+        row2.removeFromRight (G);
+        cloneBtn.setButtonText (narrow ? "" : "Clone");
+        cloneBtn.setBounds (row2.removeFromRight (narrow ? 48 : cloneBtn.widthFor ("Clone")));
+        row2.removeFromRight (G);
+        seamBtn.label = narrow ? "Seam" : "Loop seam";
+        autoFades.label = narrow ? "Auto" : "Auto fades";
+        reverseBtn.label = narrow ? "Rev" : "Reverse";
+        fadeIn.compact = fadeOut.compact = gain.compact = narrow;
+        fadeIn.shortCaption = "In";
+        fadeOut.shortCaption = "Out";
+        gain.shortCaption = "Gain";
+        const int fixed = autoFades.naturalWidth() + reverseBtn.naturalWidth() + seamBtn.naturalWidth() + 5 * G;
+        const int boxW = juce::jmax (100, (row2.getWidth() - fixed) / 3);
+        fadeIn.setBounds (row2.removeFromLeft (boxW));
+        row2.removeFromLeft (G);
+        fadeOut.setBounds (row2.removeFromLeft (boxW));
+        row2.removeFromLeft (G);
+        autoFades.setBounds (row2.removeFromLeft (autoFades.naturalWidth()));
+        row2.removeFromLeft (G);
+        reverseBtn.setBounds (row2.removeFromLeft (reverseBtn.naturalWidth()));
+        row2.removeFromLeft (G);
+        seamBtn.setBounds (row2.removeFromRight (seamBtn.naturalWidth()));
+        row2.removeFromRight (G);
+        gain.setBounds (row2);
     }
     // list module
     {
@@ -578,12 +884,12 @@ void ReviewPage::resized()
         put (0, cc.num);
         x += cc.play + GAP;
         put (1, cc.name);
-        const int rightW = cc.dur + cc.type + cc.approve + cc.del + 3 * GAP + 16 + 10;
+        const int rightW = cc.dur + cc.type + cc.approve + 2 * cc.del + 4 * GAP - 4 + 16 + 10;
         const int waveW = juce::jmax (40, hr.getRight() - x - rightW);
         put (2, waveW);
         put (3, cc.dur);
         put (4, cc.type);
-        put (5, cc.approve + cc.del + GAP);
+        put (5, cc.approve + 2 * cc.del + 2 * GAP - 4);
         viewport.setBounds (c);
         empty.setBounds (listMod.content());
         const int w = viewport.getMaximumVisibleWidth();

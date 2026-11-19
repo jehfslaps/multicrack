@@ -86,7 +86,9 @@ class History:
         chops, sel = snap
         self._key = None
         w = self.win
-        w.chops = [replace(c) for c in chops]
+        # what's already in the folder stays saved (undo never makes Export write it twice)
+        saved = {c.id: c.exported for c in w.chops if c.exported}
+        w.chops = [replace(c, exported=saved.get(c.id, c.exported)) for c in chops]
         rp = w.review_page
         rp.selected = next((c for c in w.chops if c.id == sel), None)
         for st in w.stems:

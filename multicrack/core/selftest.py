@@ -128,6 +128,15 @@ def run(gui=True) -> int:
             assert os.path.basename(got[0]) == want and len(os.listdir(part)) == 2, os.listdir(part)
             w._exported(got, part, todo)
             del w.output_folder
+            # your own chop (N): added on top of the AI's, right after the selected one
+            n2 = len(w.chops)
+            w.review_page.select(w.chops[0], play=False)
+            w.review_page.new_chop_here()
+            mine = w.review_page.selected
+            assert len(w.chops) == n2 + 1 and mine.origin == "manual" and mine.end > mine.start, "new chop"
+            assert w.chops.index(mine) == 1, "new chop not placed after the selected one"
+            w.undo()
+            assert len(w.chops) == n2, "undo new chop"
             w.theme_btn.setChecked(True)
             w.toggle_theme()
             w.theme_btn.setChecked(False)

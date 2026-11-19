@@ -95,16 +95,26 @@ public:
     void mouseUp (const juce::MouseEvent&) override { padDragged = false; }
     int selected = -1;
 
+    // editor actions (buttons and keys)
+    void togglePlay();
+    void cloneSelected();
+    void newChopHere();          // N: a new chop at the playhead (or the middle of the view)
+    void doUndo();
+    void doRedo();
+
 private:
     void updateHeader();
     void updateEditor();
     void applyTexts();
     void moveSelection (int delta);
+    void loadFx (const Chop& c);
+    int playheadSample() const;  // where the stem is playing in the editor, or -1
     Context& ctx;
     Module head;
     Text count { "", "on_dark", 21, 600, 2.2f };
     LedMeter meter;
-    HwButton approveAll { "Approve all", HwButton::key, "check" }, exportBtn { "Export", HwButton::red, "export" };
+    HwButton approveAll { "Approve all", HwButton::key, "check" }, exportBtn { "Export", HwButton::red, "export" },
+        undoBtn { "Undo", HwButton::key, "undo" }, redoBtn { "Redo", HwButton::key, "redo" };
     Module editorMod, listMod;
     PanelSplitter split { editorMod, listMod, 0.47f };
     Text edName { "", "on_dark", 15, 500, 0.6f };
@@ -115,16 +125,22 @@ private:
     ChopView view;
     Tile transport;
     HwButton playBtn { "", HwButton::key, "play" }, stopBtn { "", HwButton::key, "stop" };
-    LedToggle loopBtn { "Loop", true, "loop" };
+    LedToggle loopBtn { "Loop", true, "loop" }, snapBtn { "Snap", true, "magnet" }, autoFades { "Auto fades", true },
+        reverseBtn { "Reverse", false, "reverse" }, seamBtn { "Smooth loop seam", false };
+    HwButton resetBtn { "Reset trim", HwButton::dark, "reset", false, 11.5f }, wholeBtn { "Whole stem", HwButton::dark, "expand", false, 11.5f },
+        zoomOut { "", HwButton::icon, "minus" }, zoomIn { "", HwButton::icon, "plus" }, zoomChop { "Chop", HwButton::dark, {}, false, 10.5f },
+        cloneBtn { "Clone", HwButton::dark, "copy", false, 11.5f }, newBtn { "New chop", HwButton::dark, "newchop", false, 11.5f };
+    Tile zoomTile;
+    Text zoomCap { "Zoom", "on_dark", 11.5f, 600, 1.6f, true };
+    ValueBox fadeIn { "Fade in", 0, 5000, " ms", 1, 3.2 }, fadeOut { "Fade out", 0, 10000, " ms", 1, 3.2 }, gain { "Gain", -48, 0, " dB", 1 };
     HwButton dragBtn { "Drag into your DAW", HwButton::dark, "drag", false, 11.5f };
-    Text dragHint { "Or drag any row below. Arrow keys play the next / previous chop, A approves.", "on_dark_muted", 11.5f, 400, 0.3f };
     juce::OwnedArray<Text> cols;
     juce::Viewport viewport;
     juce::Component rowsHolder;
     juce::OwnedArray<juce::Component> rows;       // GroupRow and ChopRow in order
     std::map<int, ChopRow*> rowById;
     Text empty { juce::String::fromUTF8 ("NOTHING TO REVIEW YET  ·  LOAD STEMS AND PRESS PROCESS ALL"), "on_dark_dim", 12.5f, 500, 2.0f };
-    int lastChopCount = -1;
+    int lastChopCount = -1, shownChop = -1, followStem = -1;
     bool padDragged = false;
     friend class ChopRow;
     friend class GroupRow;

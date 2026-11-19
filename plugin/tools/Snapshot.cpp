@@ -124,6 +124,49 @@ int main (int argc, char** argv)
         view.go (1);
         pump (50);
     }
+    // ---- the editor: trim + undo / redo, clone, your own chop, fades
+    {
+        auto* c = s.chopById (pick);
+        const int s0 = c->start, e0 = c->end, n0 = (int) s.chops.size();
+        s.setTrim (pick, s0 + 200, e0 - 200);
+        if (s.chopById (pick)->start != s0 + 200)
+            return fail ("trim did not apply");
+        s.undo();
+        if (s.chopById (pick)->start != s0)
+            return fail ("undo did not restore the trim");
+        s.redo();
+        s.resetTrim (pick);
+        if (s.chopById (pick)->start != s0 || s.chopById (pick)->end != e0)
+            return fail ("reset trim");
+        rv.select (pick, false);
+        rv.cloneSelected();
+        if ((int) s.chops.size() != n0 + 1)
+            return fail ("clone");
+        const int stemId = s.chopById (pick)->stemId;
+        s.previewStem (stemId, s.chopById (pick)->end + 2000);
+        pump (300);
+        rv.tick();
+        rv.newChopHere();
+        if ((int) s.chops.size() != n0 + 2 || s.chopById (rv.selected)->origin != "manual")
+            return fail ("new chop");
+        std::printf ("editor: clone + own chop ok (%zu chops), own chop %d..%d\n", s.chops.size(),
+                     s.chopById (rv.selected)->start, s.chopById (rv.selected)->end);
+        s.setFades (rv.selected, 5.0, 120.0);
+        s.setGain (rv.selected, -6.0);
+        pump (100);
+        view.setTheme (false);
+        editor->setSize (sizes[0].first, sizes[0].second);
+        pump (100);
+        save (*editor, outDir.getChildFile ("7_editor_own_chop.png"));
+        s.undo();
+        s.undo();
+        s.undo();
+        s.undo();
+        if ((int) s.chops.size() != n0)
+            return fail ("undo back to the AI chops");
+        s.stopPreview();
+        rv.select (pick, false);
+    }
     // drag-out file
     auto f = s.renderForDrag (pick);
     std::printf ("drag file: %s (%lld bytes)\n", f.getFileName().toRawUTF8(), (long long) f.getSize());

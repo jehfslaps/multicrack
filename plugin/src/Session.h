@@ -66,6 +66,25 @@ public:
     void deleteChop (int chopId);
     void setLabel (int chopId, const juce::String& label);
     int approvedCount() const;
+
+    // --- editing (every change can be undone)
+    void checkpoint();                                   // remember the chops before a change
+    bool undo();
+    bool redo();
+    bool canUndo() const { return ! undoStack.empty(); }
+    bool canRedo() const { return ! redoStack.empty(); }
+    void setTrim (int chopId, int start, int end, bool remember = true);
+    void resetTrim (int chopId);
+    int cloneChop (int chopId);                          // returns the copy's id (placed right after)
+    // your own chop: starts at the sound nearest `at` (looking back a little, for when you press
+    // N just after hearing it), ends where the next sound starts. Returns its id.
+    int newChopAt (int stemId, int at, int afterChopId);
+    void setFades (int chopId, double inMs, double outMs, bool remember = true);   // < 0 = automatic
+    void setGain (int chopId, double db, bool remember = true);
+    void setReverse (int chopId, bool on);
+    void setSeam (int chopId, bool on);
+    int magnet (int stemId, int s);                      // start dropped near a hit -> its attack
+    int snapToBar (int stemId, int s) const;             // loops: nearest bar line
     int toExportCount() const;                          // approved and not saved yet
     int savedCount() const;
     std::map<int, std::string> names() const;          // chop id -> file name
@@ -82,7 +101,10 @@ public:
 
     // --- preview
     void preview (int chopId, bool loop = false);
+    void previewStem (int stemId, int fromSample);       // the whole stem from a spot, until stopped
     void stopPreview();
+    static constexpr int STEM_PLAY = 1 << 28;            // player ids at or above this play a stem
+    int stemPlayFrom = 0, stemPlayLen = 0;               // the part of the stem being played
     PreviewPlayer& player;
 
     // --- work in the background
@@ -101,6 +123,9 @@ public:
 private:
     void run (const juce::String& message, std::function<std::function<void()> (std::function<bool()> cancelled)> job);
     void changed();
+    void edited();                                       // chop list changed by an edit
+    void keepSaved (std::vector<Chop>& restored) const;
+    std::vector<std::vector<Chop>> undoStack, redoStack;
     bool busy_ = false;
     juce::CriticalSection progressLock;
     juce::String busyMessage;

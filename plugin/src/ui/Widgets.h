@@ -236,6 +236,39 @@ public:
     void paint (juce::Graphics&) override;
 };
 
+// A caption and a value you drag up / down (Shift = fine), nudge with the wheel or reset with a
+// double-click. Stands in for the desktop app's knobs.
+class ValueBox : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    ValueBox (juce::String caption, double minV, double maxV, juce::String unit, int decimals, double curve = 1.0);
+    void setValue (double v, bool isAuto = false);
+    double getValue() const { return value; }
+    double defaultValue = 0;
+    juce::String autoText;                         // shown instead of the number when "auto"
+    std::function<void()> onDragStart;             // before the first change (undo checkpoint)
+    std::function<void (double)> onChange;         // while dragging
+    std::function<void()> onReset;                 // double-click
+    juce::String caption, shortCaption;
+    bool compact = false;                          // short caption, no unit (narrow windows)
+    int naturalWidth() const;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+
+private:
+    double toNorm (double v) const;
+    double fromNorm (double t) const;
+    void change (double v);
+    double lo, hi, value = 0, normPress = 0, curve;
+    juce::String unit;
+    int decimals;
+    bool isAutoShown = false, started = false;
+};
+
 // ======================================================================= fields
 class Field : public juce::TextEditor
 {

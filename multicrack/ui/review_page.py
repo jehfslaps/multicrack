@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (QApplication, QFrame, QHBoxLayout, QLabel, QLayou
 
 from ..core.audio import default_fades_ms, render_chop, write_wav24
 from ..core.naming import display_names, to_export
+from ..core import engines
+from ..core.model import Chop
 from .common import label_combo, magnet_to_hit
 from .skin import core as K
 from .skin import widgets as W
@@ -395,6 +397,12 @@ class ReviewPage(QWidget):
         self.whole_btn.setToolTip("Show the entire stem")
         self.whole_btn.clicked.connect(self.editor.show_all)
         r1.addWidget(self.whole_btn)
+        self.new_btn = W.HwButton("New chop", "dark", icon="plus", min_h=H, px=11.5)
+        self.new_btn.setToolTip("Make your own chop (N). Click the waveform to play the stem, then press N "
+                                "(or this button) where you hear a sound. It starts on that sound; drag "
+                                "the red flags to fine-tune it.")
+        self.new_btn.clicked.connect(self.new_chop_here)
+        r1.addWidget(self.new_btn)
         tl.addLayout(r1)
 
         # row 2: per-chop sound controls
@@ -754,6 +762,8 @@ class ReviewPage(QWidget):
             self.win.redo()
         elif k == Qt.Key_S and not ctrl:
             self.ed_snap.toggle()
+        elif k == Qt.Key_N and not ctrl:
+            self.new_chop_here()
         elif k == Qt.Key_L and not ctrl:
             self.ed_loop.toggle()
         elif k == Qt.Key_R and not ctrl and self.selected is not None:
@@ -851,6 +861,48 @@ class ReviewPage(QWidget):
         self._rebuild_keep_scroll()
         self.setFocus()
         self.win.session_changed()
+
+    def new_chop_here(self):
+        """Your own chop on top of the AI's: at the playhead while the stem plays (pressing N just
+        after hearing a sound), otherwise in the middle of the view. Starts on the nearest sound
+        and ends where the next one starts; then fine-tune it with the flags."""
+        c = self.selected
+        if c is None:
+            return
+        st = self.win.stem_by_id(c.stem_id)
+        if st is None or st.frames < 64:
+            return
+        p = self.win.player
+        pid, pos = p.playing_id, p.position()
+        stem_playing = isinstance(pid, tuple) and pid[1] == st.id and pos is not None
+        at = int(pid[2] + pos) if stem_playing else (self.editor.view_a + self.editor.view_b) // 2
+        at = max(0, min(st.frames - 1, at))
+        onsets = [int(o) for o in engines.get_onsets(st, engines.get_analysis(st))]
+        sr = st.sr
+        start = at
+        back = [o for o in onsets if at - int(0.25 * sr) <= o <= at + int(0.03 * sr)]
+        if back:
+            start = back[-1]
+        after = [o for o in onsets if o > start + int(0.06 * sr)]
+        end = min(st.frames, min(after[0], start + 2 * sr) if after else start + sr // 2)
+        end = max(end, min(st.frames, start + int(0.06 * sr)))
+        chops = self.win.chops
+        same = [x for x in chops if x.stem_id == st.id]
+        label = c.label if c.stem_id == st.id else (same[0].label if same else st.kind.split(" (")[0])
+        self.win.history.push()
+        new = Chop(stem_id=st.id, start=start, end=end, label=label, kind="region", origin="manual")
+        chops.insert(chops.index(c) + 1 if c in chops else len(chops), new)
+        self.selected = new
+        self._orig[new.id] = (start, end)
+        self.win.chops_edited(st.id)
+        self._rebuild_keep_scroll()
+        self.setFocus()
+        QTimer.singleShot(0, lambda: new.id in self.rows and
+                          self.scroll.ensureWidgetVisible(self.rows[new.id], 0, 40))
+        self.win.session_changed()
+        self.win.status("Added your own chop. Drag the red flags to fine-tune it.")
+        if not stem_playing:
+            self.play_selected()
 
     def clone_chop(self, chop):
         chops = self.win.chops

@@ -18,6 +18,11 @@ TS_Style_Kick_01.wav.
 - FX, VOCALS, MELODIC PARTS: impacts, risers, adlibs, phrases, stabs and
   chords, each with its full tail.
 - REVIEW: play, trim, fade, reverse, change the type and approve each chop.
+  Add your own chops on top of the AI's: click the waveform to play the
+  stem, press N where you hear something the AI missed.
+- EXPORT ONLY WHAT YOU APPROVED. Chops you didn't approve are skipped;
+  nothing to delete. Approve more later and export again: only the new
+  ones are added.
 - OUTPUT: 24-bit WAV at the original sample rate, normalized to -0.1 dB,
   one folder per song. Nothing is ever overwritten.
 
@@ -62,21 +67,39 @@ HOW IT WORKS
 1. LOAD     Type the artist and song, then drop in the stems (or the whole
             stem folder). Change any stem's type before processing if it
             guessed wrong.
-2. REVIEW   Every chop with its waveform. Play it, fix the type, approve it.
-            When everything is green, export.
+2. REVIEW   Every chop with its waveform. Play it, fix the type, approve
+            the ones you want. Then press Export: only approved chops are
+            saved, the rest are skipped.
 3. EXPORT   Desktop app: one folder on your Desktop, for example
             "Taylor Swift - Style (Chopped)". Plug-in: drag chops from the
             list into your project, or export them all to a folder.
 
 
-KEYS ON THE REVIEW PAGE (desktop app)
--------------------------------------
+THE EDITOR (top of the Review page)
+-----------------------------------
+Click the waveform    play the whole stem from that spot (Space stops)
+Red flags             drag to move the start and the end
+Grab bar (top)        drag to slide the whole chop, same length
+Drag across           pick a new section for the chop
+Mouse wheel           zoom in / out.  Shift+wheel: move left / right
+Whole stem            zoom all the way out.  Chop: zoom back to the chop
+New chop (N)          your own chop, on top of the AI's: while the stem
+                      plays, press N where you hear a sound. It starts on
+                      that sound; drag the flags to fine-tune it.
+Clone                 a copy of the chop to fine-tune
+Fade in / out, Gain   drag up / down (Shift = fine), double-click resets
+Snap                  starts line up with hits; loops slide on the bars
+
+
+KEYS ON THE REVIEW PAGE
+-----------------------
 Up / Down    move through the chops and play each one
 Space        play / stop
 A            approve and jump to the next chop
 Enter        approve / un-approve
 Delete       delete the chop
 Ctrl+D       clone the chop
+N            new chop at the playhead (your own chop)
 Ctrl+Z / Y   undo / redo
 R            reverse on / off
 L            loop playback on / off
@@ -87,10 +110,10 @@ THE PLUG-IN
 -----------
 Load it as an effect on any track. Chops you audition play through that
 track's output; the "Preview level" parameter sets how loud.
-This version of the plug-in does loading, chopping, the review list
-(play, approve, change the type, delete, drag out) and export. The trim
-editor, fades, undo and the sound-recognition model are in the desktop app
-for now and come to the plug-in next.
+It has the same editor as the desktop app (flags, zoom, your own chops,
+clone, fades, reverse, gain, undo). Drag any chop from the list straight
+into your project. The sound-recognition model (for stems with unclear
+names) is in the desktop app for now.
 Menu (top right) > UI size: Small, Medium or Large, in both.
 
 

@@ -90,6 +90,7 @@ struct Chop
     double gainDb = 0.0;         // 0 = full level (normalized); negative turns it down
     bool seam = true;            // loops: crossfade the loop point
     std::string exported;        // file name it was saved as ("" = not saved yet)
+    int origStart = -1, origEnd = -1;   // where it was found ("Reset trim" goes back here)
     int id = nextId();
 
     int length() const { return end > start ? end - start : 0; }

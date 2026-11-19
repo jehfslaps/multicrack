@@ -19,8 +19,12 @@ After that the app updates itself: when a new version is out, click **Update**.
    Xenakis works out what each file is (kick, hats, drum loops, FX, vocals, guitar...).
    Change any type, or switch a file to Manual, before processing.
    Drop a folder that holds several song folders (named like `Artist - Song`) to queue them up.
-2. **Review:** every chop shows up with its waveform. Press play, drag the blue handles to trim,
-   change the type from the dropdown, and give it a thumbs up. When everything is green, export.
+2. **Review:** every chop shows up with its waveform. Press play, drag the red flags to trim,
+   change the type from the dropdown, and approve the ones you want. Export saves only the
+   approved chops (the rest are skipped, nothing to delete); approve more later and export again
+   to add just the new ones.
+   - Your own chops: click the waveform to play the stem, press **N** (or **New chop**) where
+     you hear something the AI missed. It starts on that sound and ends at the next one.
    - Per chop: fade in / fade out, reverse, gain (turn down from full level), smooth loop seam,
      clone, delete. Drag any row straight into FL Studio.
    - Trim editor: click anywhere to play the stem from that spot (Space stops). Drag the flags
@@ -54,6 +58,7 @@ versions when it starts and updates itself with one click.
 | Enter | Approve / un-approve |
 | Delete | Delete the chop |
 | Ctrl+D | Clone the chop |
+| N | New chop at the playhead (your own chop, on top of the AI's) |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
 | R | Reverse on / off |
 | L | Loop playback on / off |
@@ -92,9 +97,10 @@ all, review, and drag samples from the list straight into your project. Chops yo
 through that track.
 
 The plug-in is a C++ (JUCE) rebuild of the same engine, in `plugin/`. It makes exactly the same
-chops as the desktop app (checked file-for-file on real stems). Stage 1 covers loading, chopping,
-the review list (approve, type, delete, drag out) and export; the trim editor, fades, undo, the
-AI sound recognition and saving the session in your DAW project come next.
+chops as the desktop app (checked file-for-file on real stems), and has the same editor: flags,
+grab bar, wheel zoom, whole stem, your own chops (N), clone, fades, reverse, gain, seam, snap and
+undo. Still to come in the plug-in: the AI sound recognition and saving the session in your DAW
+project.
 
 ```
 cmake -S plugin -B build && cmake --build build --config Release --target Xenakis_VST3 Xenakis_CLAP

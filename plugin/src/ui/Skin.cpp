@@ -456,6 +456,13 @@ juce::Path iconPath (const juce::String& name, float s)
     else if (name == "plus") { mv (6, 12); ln (18, 12); mv (12, 6); ln (12, 18); }
     else if (name == "expand") { mv (3.5f, 9); ln (3.5f, 4); ln (8.5f, 4); mv (15.5f, 4); ln (20.5f, 4); ln (20.5f, 9); mv (20.5f, 15); ln (20.5f, 20); ln (15.5f, 20); mv (8.5f, 20); ln (3.5f, 20); ln (3.5f, 15); }
     else if (name == "drag") { mv (12, 3.5f); ln (12, 15.5f); mv (7.5f, 11); ln (12, 15.5f); ln (16.5f, 11); mv (4.5f, 19.5f); ln (19.5f, 19.5f); }
+    else if (name == "undo") { mv (9, 5); ln (4.5f, 9.5f); ln (9, 14); mv (4.5f, 9.5f); ln (14, 9.5f); cu (22, 9.5f, 22, 20, 14, 20); ln (9, 20); }
+    else if (name == "redo") { mv (15, 5); ln (19.5f, 9.5f); ln (15, 14); mv (19.5f, 9.5f); ln (10, 9.5f); cu (2, 9.5f, 2, 20, 10, 20); ln (15, 20); }
+    else if (name == "copy") { P.addRoundedRectangle (8.5f * k, 8.5f * k, 11 * k, 11 * k, 1.5f * k); mv (15.5f, 5.5f); ln (15.5f, 4.5f); ln (4.5f, 4.5f); ln (4.5f, 15.5f); ln (5.5f, 15.5f); }
+    else if (name == "reset") { mv (5, 5); ln (5, 10); ln (10, 10); mv (5.5f, 9.5f); cu (7, 5.5f, 11, 4, 13, 4); cu (17.5f, 4, 20.5f, 7.5f, 20.5f, 12); cu (20.5f, 16.5f, 17, 20, 12.5f, 20); cu (9.5f, 20, 7, 18.5f, 5.6f, 16); }
+    else if (name == "magnet") { mv (6, 4); ln (6, 12); cu (6, 21, 18, 21, 18, 12); ln (18, 4); mv (6, 8); ln (10, 8); mv (14, 8); ln (18, 8); mv (10, 4); ln (10, 12); cu (10, 15.5f, 14, 15.5f, 14, 12); ln (14, 4); }
+    else if (name == "reverse") { mv (20, 12); ln (4, 12); mv (9, 7); ln (4, 12); ln (9, 17); }
+    else if (name == "newchop") { mv (4, 5); ln (4, 19); mv (4, 5); ln (9, 5); mv (4, 19); ln (9, 19); mv (15, 12); ln (21, 12); mv (18, 9); ln (18, 15); }
     else if (name == "grip") { for (float x : { 9.0f, 15.0f }) for (float y : { 6.0f, 12.0f, 18.0f }) P.addEllipse ((x - 1.3f) * k, (y - 1.3f) * k, 2.6f * k, 2.6f * k); }
     return P;
 }

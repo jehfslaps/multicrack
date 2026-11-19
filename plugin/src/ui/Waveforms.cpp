@@ -139,19 +139,60 @@ void MiniWave::paint (juce::Graphics& g)
 }
 
 // ------------------------------------------------------------------ chop view
-void ChopView::set (std::shared_ptr<PeakCache> c, int n_, int sr_, int s, int e)
+void ChopView::set (std::shared_ptr<PeakCache> c, int n_, int sr_, int s, int e, bool keepView)
 {
+    const bool same = c == cache && n_ == n;
     cache = std::move (c);
     n = n_;
     sr = sr_;
-    start = s;
-    end = e;
+    if (drag == None)
+    {
+        start = s;
+        end = e;
+    }
+    if (keepView && same && viewB > viewA)
+        repaint();
+    else
+        showChop();
+}
+
+void ChopView::setFx (int fi, int fo, bool rev)
+{
+    if (fi != fadeIn || fo != fadeOut || rev != reverse)
+    {
+        fadeIn = fi;
+        fadeOut = fo;
+        reverse = rev;
+        repaint();
+    }
+}
+
+void ChopView::showChop()
+{
     const int len = juce::jmax (1, end - start);
     const int pad = juce::jmax ((int) (0.25 * len), (int) (0.12 * sr));
-    const int span = juce::jmin (n, juce::jmax ((int) (0.01 * sr), len + 2 * pad));
-    viewA = juce::jmax (0, juce::jmin (n - span, start - pad));
-    viewB = viewA + span;
+    setView (start - pad, end + pad);
+}
+
+void ChopView::setView (int a, int b)
+{
+    const int span = juce::jmin (n, juce::jmax ((int) (0.01 * sr), b - a));
+    a = juce::jmax (0, juce::jmin (n - span, a));
+    viewA = a;
+    viewB = a + span;
     repaint();
+}
+
+void ChopView::zoom (double factor, int centre)
+{
+    if (! cache)
+        return;
+    const int span = viewB - viewA;
+    if (centre < 0)
+        centre = viewA + span / 2;
+    const double ns = span * factor;
+    const double a = centre - (centre - viewA) * ns / juce::jmax (1, span);
+    setView ((int) a, (int) (a + ns));
 }
 
 juce::Rectangle<float> ChopView::area() const
@@ -166,13 +207,191 @@ float ChopView::xOf (double s) const
     return a.getX() + (float) ((s - viewA) / juce::jmax (1, viewB - viewA)) * a.getWidth();
 }
 
-void ChopView::mouseUp (const juce::MouseEvent& e)
+int ChopView::sOf (float x) const
 {
-    if (! cache || ! onClickAt)
-        return;
     const auto a = area();
-    const int s = viewA + (int) ((e.position.x - a.getX()) / juce::jmax (1.0f, a.getWidth()) * (viewB - viewA));
-    onClickAt (juce::jlimit (0, n, s));
+    return viewA + (int) ((x - a.getX()) / juce::jmax (1.0f, a.getWidth()) * (viewB - viewA));
+}
+
+juce::Rectangle<float> ChopView::handleRect() const
+{
+    const auto r = getLocalBounds().toFloat().reduced (1);
+    const float cx = (xOf (start) + xOf (end)) / 2;
+    return { cx - 22, r.getY() + 2, 44, 15 };
+}
+
+int ChopView::near (float x) const
+{
+    const float ds = std::abs (x - xOf (start)), de = std::abs (x - xOf (end));
+    if (juce::jmin (ds, de) < 10)
+        return ds <= de ? 1 : 2;
+    return 0;
+}
+
+void ChopView::mouseMove (const juce::MouseEvent& e)
+{
+    if (! cache)
+        return;
+    const float x = e.position.x;
+    const bool nearEdge = juce::jmin (std::abs (x - xOf (start)), std::abs (x - xOf (end))) < 5;
+    const bool over = handleRect().expanded (3, 2).contains (e.position) && ! nearEdge;
+    if (over != hoverHandle)
+    {
+        hoverHandle = over;
+        repaint();
+    }
+    const int part = near (x);
+    setMouseCursor (over ? juce::MouseCursor::DraggingHandCursor
+                         : part ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::PointingHandCursor);
+    setTooltip (over ? "Drag to slide the whole chop (same length)"
+                     : part ? "Drag to trim"
+                            : "Click to play the stem from here. Drag across to pick a new section. Wheel zooms, Shift+wheel scrolls.");
+}
+
+void ChopView::mouseExit (const juce::MouseEvent&)
+{
+    if (hoverHandle)
+    {
+        hoverHandle = false;
+        repaint();
+    }
+}
+
+void ChopView::mouseDown (const juce::MouseEvent& e)
+{
+    if (! cache || e.mods.isPopupMenu())
+        return;
+    const float x = e.position.x;
+    const bool nearEdge = juce::jmin (std::abs (x - xOf (start)), std::abs (x - xOf (end))) < 5;
+    a0 = start;
+    b0 = end;
+    if (handleRect().expanded (3, 2).contains (e.position) && ! nearEdge)
+    {
+        drag = Move;
+        xPress = x;
+        spp = (viewB - viewA) / (double) juce::jmax (1.0f, area().getWidth());
+        repaint();
+    }
+    else if (const int part = near (x))
+        drag = part == 1 ? Start : End;
+    else
+    {
+        drag = New;
+        newStarted = false;
+        anchor = juce::jlimit (0, n, sOf (x));
+    }
+}
+
+void ChopView::moveTo (float x)
+{
+    const int len = b0 - a0;
+    int ns = juce::jlimit (0, juce::jmax (0, n - len), a0 + (int) ((x - xPress) * spp));
+    if (snapMove)
+        ns = juce::jlimit (0, juce::jmax (0, n - len), snapMove (ns));
+    start = ns;
+    end = ns + len;
+    // keep the chop in view while sweeping through the stem
+    const int span = viewB - viewA;
+    if (span < n)
+    {
+        if (end > viewB)
+            setView (end - span + span / 20, end + span / 20);
+        else if (start < viewA)
+            setView (start - span / 20, start - span / 20 + span);
+    }
+}
+
+void ChopView::mouseDrag (const juce::MouseEvent& e)
+{
+    if (drag == None)
+        return;
+    const float x = e.position.x;
+    const int minLen = juce::jmax (1, (int) (0.005 * sr));
+    const int s = juce::jlimit (0, n, sOf (x));
+    if (drag == Move)
+        moveTo (x);
+    else if (drag == Start)
+        start = juce::jmin (s, end - minLen);
+    else if (drag == End)
+        end = juce::jmax (s, start + minLen);
+    else if (drag == New)
+    {
+        if (newStarted || std::abs (s - anchor) > minLen)
+        {
+            newStarted = true;
+            start = juce::jmin (anchor, s);
+            end = juce::jmax (juce::jmax (anchor, s), start + minLen);
+        }
+        else
+            return;
+    }
+    // drag past the edge of the view: scroll along
+    const auto a = area();
+    if (drag != Move && (x < a.getX() || x > a.getRight()) && viewB - viewA < n)
+    {
+        const int step = (viewB - viewA) / 30;
+        setView (viewA + (x < a.getX() ? -step : step), viewB + (x < a.getX() ? -step : step));
+    }
+    repaint();
+    if (onSelecting)
+        onSelecting (start, end);
+}
+
+void ChopView::mouseUp (const juce::MouseEvent&)
+{
+    const auto d = drag;
+    drag = None;
+    if (d == None || ! cache)
+        return;
+    const int minLen = juce::jmax (1, (int) (0.005 * sr));
+    if (d == New && ! newStarted)
+    {
+        if (onSeek)
+            onSeek (anchor);   // a plain click: play the stem from here
+        return;
+    }
+    if (d == Move)
+    {
+        if (start == a0 && end == b0)
+        {
+            repaint();
+            return;
+        }
+        if (snap && ! snapMove)
+        {
+            const int len = end - start;
+            const int ns = juce::jlimit (0, juce::jmax (0, n - len), snap (start));
+            start = ns;
+            end = ns + len;
+        }
+    }
+    else if ((d == Start || d == New) && snap)
+        start = juce::jmin (snap (start), end - minLen);
+    repaint();
+    if (onTrimmed && (start != a0 || end != b0))
+        onTrimmed (start, end);
+}
+
+void ChopView::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
+{
+    if (! cache)
+        return;
+    const float dx = w.deltaX, dy = w.deltaY;
+    if (e.mods.isShiftDown() || std::abs (dx) > std::abs (dy))
+    {
+        const float d = dx != 0 ? dx : dy;
+        const int span = viewB - viewA;
+        const int shift = (int) (-d * span * 0.6f);
+        setView (viewA + shift, viewB + shift);
+    }
+    else if (dy != 0)
+        zoom (dy > 0 ? 0.8 : 1.25, juce::jlimit (0, n, sOf (e.position.x)));
+}
+
+void ChopView::mouseMagnify (const juce::MouseEvent& e, float scale)
+{
+    if (cache && scale > 0)
+        zoom (1.0 / scale, juce::jlimit (0, n, sOf (e.position.x)));
 }
 
 static double timeStep (double span)
@@ -228,8 +447,14 @@ void ChopView::paint (juce::Graphics& g)
     }
     std::vector<float> mins, maxs, cm, cx;
     cache->columns (viewA, viewB, juce::jmax (8, (int) (a.getWidth() / 1.4f)), mins, maxs);
-    cache->columns (start, end, 64, cm, cx);
-    const float gain = waveGain (cm, cx);
+    float gain;
+    if (viewB - viewA > 4 * juce::jmax (1, end - start))
+        gain = juce::jmin (waveGain (mins, maxs), 8.0f);
+    else
+    {
+        cache->columns (start, end, 64, cm, cx);
+        gain = waveGain (cm, cx);
+    }
     paintWave (g, a, mins, maxs, gain, C ("wave_dim"), juce::Colour (0xff8a8f94));
     const float xs = xOf (start), xe = xOf (end);
     {
@@ -239,8 +464,32 @@ void ChopView::paint (juce::Graphics& g)
         g.setColour (C ("wave").withAlpha ((juce::uint8) 18));
         g.fillRect (juce::Rectangle<float> (xs, a.getY(), xe - xs, a.getHeight()));
     }
+    // fades as heard (a reversed chop fades in from its original end)
+    {
+        const int fi = reverse ? fadeOut : fadeIn, fo = reverse ? fadeIn : fadeOut;
+        const float dashes[] = { 4.0f, 3.0f };
+        g.setColour (juce::Colour::fromRGBA (235, 232, 225, 190));
+        if (fi > 0)
+            g.drawDashedLine ({ xs, a.getBottom(), xOf (start + fi), a.getY() }, dashes, 2, 1.3f);
+        if (fo > 0)
+            g.drawDashedLine ({ xOf (end - fo), a.getY(), xe, a.getBottom() }, dashes, 2, 1.3f);
+    }
     g.setColour (MARK.withAlpha ((juce::uint8) 70));
     g.fillRect (juce::Rectangle<float> (xs, r.getY() + 8, juce::jmax (0.0f, xe - xs), 5));
+    {
+        // grab bar: drag to slide the whole chop
+        const auto hr = handleRect();
+        const bool hot = hoverHandle || drag == Move;
+        juce::ColourGradient gr (hot ? juce::Colours::white : juce::Colour (0xfff2eee6), hr.getX(), hr.getY(),
+                                 juce::Colour (0xffbdb5a7), hr.getX(), hr.getBottom(), false);
+        g.setGradientFill (gr);
+        g.fillRoundedRectangle (hr, 3);
+        g.setColour (juce::Colour::fromRGBA (0, 0, 0, 200));
+        g.drawRoundedRectangle (hr, 3, 1);
+        g.setColour (juce::Colour::fromRGBA (40, 36, 32, 200));
+        for (float dx : { -6.0f, -2.0f, 2.0f, 6.0f })
+            g.drawLine (hr.getCentreX() + dx, hr.getY() + 3.5f, hr.getCentreX() + dx, hr.getBottom() - 3.5f, 1.2f);
+    }
     for (float x : { xs, xe })
     {
         g.setColour (MARK);

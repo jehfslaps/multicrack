@@ -148,6 +148,105 @@ void Tile::paint (juce::Graphics& g)
     g.drawLine (r.getX() + 4, r.getY() + 1.2f, r.getRight() - 4, r.getY() + 1.2f, 1.0f);
 }
 
+// ================================================================= value box
+ValueBox::ValueBox (juce::String cap, double minV, double maxV, juce::String u, int dec, double cv)
+    : caption (std::move (cap)), lo (minV), hi (maxV), curve (cv), unit (std::move (u)), decimals (dec)
+{
+    setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+}
+
+void ValueBox::setValue (double v, bool isAuto)
+{
+    v = juce::jlimit (lo, hi, v);
+    if (v != value || isAuto != isAutoShown)
+    {
+        value = v;
+        isAutoShown = isAuto;
+        repaint();
+    }
+}
+
+double ValueBox::toNorm (double v) const { return std::pow (juce::jlimit (0.0, 1.0, (v - lo) / juce::jmax (1e-9, hi - lo)), 1.0 / curve); }
+double ValueBox::fromNorm (double t) const { return lo + (hi - lo) * std::pow (juce::jlimit (0.0, 1.0, t), curve); }
+
+void ValueBox::change (double v)
+{
+    const double q = std::pow (10.0, decimals);
+    v = juce::jlimit (lo, hi, std::round (v * q) / q);
+    if (! started)
+    {
+        started = true;
+        if (onDragStart)
+            onDragStart();
+    }
+    value = v;
+    isAutoShown = false;
+    repaint();
+    if (onChange)
+        onChange (v);
+}
+
+void ValueBox::mouseDown (const juce::MouseEvent&)
+{
+    started = false;
+    normPress = toNorm (value);
+}
+
+void ValueBox::mouseDrag (const juce::MouseEvent& e)
+{
+    const double px = e.mods.isShiftDown() ? 900.0 : 220.0;
+    const double t = normPress - e.getDistanceFromDragStartY() / px;
+    if (e.getDistanceFromDragStart() > 1)
+        change (fromNorm (t));
+}
+
+void ValueBox::mouseUp (const juce::MouseEvent&) { started = false; }
+
+void ValueBox::mouseDoubleClick (const juce::MouseEvent&)
+{
+    started = false;
+    if (onReset)
+        onReset();
+}
+
+void ValueBox::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w)
+{
+    if (w.deltaY == 0)
+        return;
+    started = false;
+    change (fromNorm (toNorm (value) + (w.deltaY > 0 ? 0.02 : -0.02)));
+    started = false;
+}
+
+int ValueBox::naturalWidth() const
+{
+    return (int) std::ceil (14 + textWidth (caption.toUpperCase(), font (11.5f, 600, 1.6f)) + 12 + 92 + 8);
+}
+
+void ValueBox::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2a2c30), r.getX(), r.getY(), juce::Colour (0xff222326), r.getX(), r.getBottom(), false));
+    g.fillRoundedRectangle (r, 4);
+    g.setColour (isMouseOverOrDragging() ? juce::Colour (0xff5a5d63) : juce::Colour (0xff3c3f44));
+    g.drawRoundedRectangle (r, 4, 1.0f);
+    auto in = r.reduced (8, 7);
+    const float vw = juce::jmin (compact ? 70.0f : 92.0f, in.getWidth() * (compact ? 0.66f : 0.55f));
+    auto vr = in.removeFromRight (vw);
+    const auto cap = compact && shortCaption.isNotEmpty() ? shortCaption : caption;
+    text (g, in.withTrimmedLeft (4), cap.toUpperCase(), font (11.5f, 600, compact ? 1.0f : 1.6f), C ("on_dark"), juce::Justification::centredLeft, true);
+    g.setColour (juce::Colour (0xff141618));
+    g.fillRoundedRectangle (vr, 3);
+    g.setColour (juce::Colour (0xff3c3e43));
+    g.drawRoundedRectangle (vr, 3, 1.0f);
+    // a thin bar showing where the value sits in its range
+    const float t = (float) toNorm (value);
+    g.setColour (C ("field_focus").withAlpha ((juce::uint8) 150));
+    g.fillRect (juce::Rectangle<float> (vr.getX() + 3, vr.getBottom() - 4, (vr.getWidth() - 6) * t, 2));
+    const auto shown = isAutoShown && autoText.isNotEmpty() ? autoText : juce::String (value, decimals) + (compact ? juce::String() : unit);
+    text (g, vr.reduced (6, 0), shown, font (12.5f, 500, 0.3f), isAutoShown ? C ("on_dark_muted") : C ("glass_text"), juce::Justification::centred);
+}
+
 // ===================================================================== text
 Text::Text (juce::String t, const char* k, float px, int weight, float spacing, bool c)
     : text (std::move (t)), key (k), fpx (px), fw (weight), fsp (spacing), caps (c)
